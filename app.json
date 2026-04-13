@@ -27,7 +27,7 @@
       "package": "com.jlbarber.app"
     },
     "web": {
-      "favicon": "./assets/LogoJL.ico",
+      "favicon": "./assets/LogoJL.png",
       "bundler": "metro"
     },
     "plugins": [
