@@ -60,11 +60,12 @@ export function AppointmentCard({ appointment, variant = 'default' }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.md,
     padding: spacing.lg,
     marginBottom: spacing.sm,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
   featuredCard: {
     borderLeftWidth: 4,
@@ -83,11 +84,11 @@ const styles = StyleSheet.create({
   },
   time: {
     ...typography.subtitle,
-    color: colors.gray900,
+    color: colors.white,
   },
   featuredTime: {
     ...typography.h3,
-    color: colors.gray900,
+    color: colors.white,
   },
   timeSep: {
     ...typography.body,
@@ -95,19 +96,19 @@ const styles = StyleSheet.create({
   },
   timeEnd: {
     ...typography.body,
-    color: colors.gray600,
+    color: colors.gray400,
   },
   service: {
     ...typography.body,
-    color: colors.gray700,
+    color: colors.gray400,
   },
   featuredService: {
     ...typography.subtitle,
-    color: colors.gray800,
+    color: colors.gray300,
   },
   clientName: {
     ...typography.bodySmall,
-    color: colors.gray600,
+    color: colors.gray400,
     marginTop: spacing.xxs,
   },
   featuredMeta: {

@@ -1,6 +1,17 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
+import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
+
+function LogoutTabButton(props: any) {
+  const router = useRouter();
+  return (
+    <TouchableOpacity
+      {...props}
+      onPress={() => router.replace('/')}
+    />
+  );
+}
 
 export default function ClientLayout() {
   return (
@@ -10,8 +21,8 @@ export default function ClientLayout() {
         tabBarActiveTintColor: colors.gold,
         tabBarInactiveTintColor: colors.gray500,
         tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.gray200,
+          backgroundColor: colors.black,
+          borderTopColor: colors.gray800,
           borderTopWidth: 1,
           paddingBottom: 4,
           height: 56,
@@ -46,6 +57,17 @@ export default function ClientLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="list-outline" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="logout"
+        options={{
+          title: 'Salir',
+          tabBarIcon: ({ size }) => (
+            <Ionicons name="log-out-outline" size={size} color={colors.error} />
+          ),
+          tabBarLabelStyle: { ...typography.tabLabel, color: colors.error },
+          tabBarButton: (props) => <LogoutTabButton {...props} />,
         }}
       />
     </Tabs>

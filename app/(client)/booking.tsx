@@ -1,282 +1,606 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Image,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../src/theme';
-import { MOCK_SERVICES, MOCK_TIME_SLOTS } from '../../src/services/mock-data';
-import { TimeSlotButton } from '../../src/components/calendar/TimeSlotButton';
-import { PrimaryButton } from '../../src/components/ui/PrimaryButton';
-import { SectionCard } from '../../src/components/ui/SectionCard';
-import type { Service } from '../../src/types/database';
+import { MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS } from '../../src/services/mock-data';
+import { BookingWizardModal } from '../../src/components/modals/BookingWizardModal';
 import type { TimeSlot } from '../../src/types/models';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// ── helpers ──────────────────────────────────────────────────────
+const fmt = (d: Date) => d.toISOString().split('T')[0];
+const WORK_START = 9;
+const WORK_END = 18;
+const SLOT_DURATION = 45;
+const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+type ViewMode = 'mes' | 'semana' | 'dia';
 
 function getWeekDates(referenceDate: string) {
   const ref = new Date(referenceDate + 'T12:00:00');
-  const dayOfWeek = ref.getDay();
+  const dow = ref.getDay();
   const monday = new Date(ref);
-  monday.setDate(ref.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+  monday.setDate(ref.getDate() - dow + (dow === 0 ? -6 : 1));
   const labels = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    return { date: d.toISOString().split('T')[0], dayLabel: labels[i], dayNum: d.getDate() };
+    return { date: fmt(d), dayLabel: labels[i], dayNum: d.getDate() };
   });
 }
 
+function buildAvailableSlots(dateStr: string, duration: number): TimeSlot[] {
+  const dayAppts = MOCK_APPOINTMENTS.filter((a) => fmt(a.startAt) === dateStr && a.status !== 'no_show');
+  const dayBlocks = MOCK_TIME_BLOCKS.filter((b) => b.date === dateStr);
+  const occupied: { start: number; end: number }[] = [];
+  for (const a of dayAppts) {
+    occupied.push({ start: a.startAt.getHours() * 60 + a.startAt.getMinutes(), end: a.endAt.getHours() * 60 + a.endAt.getMinutes() });
+  }
+  for (const b of dayBlocks) {
+    const [sh, sm] = b.start_time.split(':').map(Number);
+    const [eh, em] = b.end_time.split(':').map(Number);
+    occupied.push({ start: sh * 60 + sm, end: eh * 60 + em });
+  }
+  const slots: TimeSlot[] = [];
+  let cursor = WORK_START * 60;
+  while (cursor + duration <= WORK_END * 60) {
+    const slotEnd = cursor + duration;
+    const overlaps = occupied.some((o) => cursor < o.end && slotEnd > o.start);
+    slots.push({
+      startTime: `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`,
+      endTime: `${String(Math.floor(slotEnd / 60)).padStart(2, '0')}:${String(slotEnd % 60).padStart(2, '0')}`,
+      isAvailable: !overlaps,
+    });
+    cursor += duration;
+  }
+  return slots;
+}
+
+function countFreeSlots(dateStr: string): number {
+  return buildAvailableSlots(dateStr, SLOT_DURATION).filter((s) => s.isAvailable).length;
+}
+
+function getMonthGrid(year: number, month: number) {
+  const first = new Date(year, month, 1);
+  const startDow = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = Array(startDow).fill(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function getDotColor(free: number) {
+  if (free === 0) return colors.error;
+  if (free <= 3) return colors.statusPending;
+  return colors.statusConfirmed;
+}
+
+function formatHour(minutes: number) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+// ── component ────────────────────────────────────────────────────
 export default function BookingScreen() {
-  const [selectedService, setSelectedService] = useState<Service | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+  const todayStr = fmt(new Date());
+  const todayObj = new Date();
+  const [viewMode, setViewMode] = useState<ViewMode>('mes');
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+
+  const selDateObj = new Date(selectedDate + 'T12:00:00');
+  const [calYear, setCalYear] = useState(todayObj.getFullYear());
+  const [calMonth, setCalMonth] = useState(todayObj.getMonth());
 
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
-  const availableSlots = useMemo(() => MOCK_TIME_SLOTS.filter((s) => s.isAvailable), []);
-  const today = new Date().toISOString().split('T')[0];
+  const monthGrid = useMemo(() => getMonthGrid(calYear, calMonth), [calYear, calMonth]);
 
-  const handleServiceSelect = (service: Service) => {
-    setSelectedService(service);
-  };
+  const daySlots = useMemo(
+    () => buildAvailableSlots(selectedDate, SLOT_DURATION),
+    [selectedDate]
+  );
 
-  const handleDateSelect = (date: string) => {
+  const weekAvailability = useMemo(
+    () => weekDates.map((d) => ({ ...d, freeCount: countFreeSlots(d.date), slots: buildAvailableSlots(d.date, SLOT_DURATION) })),
+    [weekDates]
+  );
+
+  const handleDateSelect = useCallback((date: string) => {
     setSelectedDate(date);
     setSelectedSlot(null);
-  };
+  }, []);
+
+  const handleMonthNav = useCallback((delta: number) => {
+    setCalMonth((m) => {
+      let nm = m + delta;
+      if (nm < 0) { setCalYear((y) => y - 1); nm = 11; }
+      else if (nm > 11) { setCalYear((y) => y + 1); nm = 0; }
+      return nm;
+    });
+  }, []);
+
+  const handleWeekShift = useCallback((delta: number) => {
+    setSelectedDate((prev) => {
+      const d = new Date(prev + 'T12:00:00');
+      d.setDate(d.getDate() + delta * 7);
+      return fmt(d);
+    });
+    setSelectedSlot(null);
+  }, []);
 
   const handleSlotSelect = (slot: TimeSlot) => {
     setSelectedSlot(slot);
+    setShowWizard(true);
   };
 
-  const handleSubmit = () => {
-    Alert.alert(
-      'Solicitud enviada',
-      'Tu cita queda pendiente hasta que Jaquelina la apruebe.',
-      [{ text: 'OK', onPress: () => { setSelectedService(null); setSelectedSlot(null); } }]
-    );
-  };
+  const capMonth = (m: number) => MONTHS_ES[m].charAt(0).toUpperCase() + MONTHS_ES[m].slice(1);
 
-  const formatWeekRange = () => {
-    if (weekDates.length === 0) return '';
-    const first = weekDates[0].dayNum;
-    const last = weekDates[weekDates.length - 1].dayNum;
-    const d = new Date(selectedDate + 'T12:00:00');
-    const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    return `Semana del ${first} al ${last} ${months[d.getMonth()]}`;
-  };
-
-  const formatDateShort = (dateStr: string) => {
-    const d = new Date(dateStr + 'T12:00:00');
-    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-    return `${days[d.getDay()]} ${d.getDate()}`;
-  };
-
+  // ── render ─────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      {/* Branded Hero Header with logo */}
       <View style={styles.header}>
-        <Image
-          source={require('../../assets/LogoJL.png')}
-          style={styles.headerLogo}
-          resizeMode="contain"
-        />
+        <Image source={require('../../assets/LogoJL.png')} style={styles.headerLogo} resizeMode="contain" />
         <View style={styles.headerTextBlock}>
           <Text style={styles.headerTitle}>Reservar cita</Text>
-          <Text style={styles.headerSubtitle}>{formatWeekRange()}</Text>
+          <Text style={styles.headerSubtitle}>Busca disponibilidad y agenda</Text>
         </View>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Week Strip — Lun to Sáb */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.weekStrip}>
-          {weekDates.map((item) => {
-            const isSelected = item.date === selectedDate;
-            const isToday = item.date === today;
-            return (
-              <TouchableOpacity
-                key={item.date}
-                style={[styles.dayCell, isSelected && styles.dayCellSelected, isToday && !isSelected && styles.dayCellToday]}
-                onPress={() => handleDateSelect(item.date)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.dayLabel, isSelected && styles.dayTextSelected]}>{item.dayLabel}</Text>
-                <Text style={[styles.dayNum, isSelected && styles.dayTextSelected, isToday && !isSelected && styles.dayNumToday]}>{item.dayNum}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {/* ── Search / filter chips ── */}
+        <View style={styles.searchCard}>
+          <View style={styles.searchHeader}>
+            <Ionicons name="search" size={18} color={colors.gold} />
+            <Text style={styles.searchTitle}>Buscar disponibilidad</Text>
+          </View>
+          <View style={styles.filterRow}>
+            {(['mes', 'semana', 'dia'] as ViewMode[]).map((mode) => {
+              const active = viewMode === mode;
+              const label = mode === 'mes' ? 'Mes' : mode === 'semana' ? 'Semana' : 'Día';
+              const icon = mode === 'mes' ? 'calendar' : mode === 'semana' ? 'grid' : 'today';
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
+                  onPress={() => setViewMode(mode)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={icon as any} size={16} color={active ? colors.white : colors.gray600} />
+                  <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
-        {/* Service Selection — always visible */}
-        <SectionCard title="Elige tu servicio">
-          {MOCK_SERVICES.map((service) => {
-            const isActive = selectedService?.id === service.id;
-            return (
-              <TouchableOpacity
-                key={service.id}
-                style={[styles.serviceOption, isActive && styles.serviceOptionActive]}
-                onPress={() => handleServiceSelect(service)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.serviceOptionInfo}>
-                  <Text style={[styles.serviceOptionName, isActive && styles.serviceOptionNameActive]}>{service.name}</Text>
-                  <Text style={styles.serviceOptionMeta}>{service.duration_minutes} min</Text>
-                </View>
-                <Text style={styles.serviceOptionPrice}>${service.price?.toLocaleString()}</Text>
-                {isActive && (
-                  <View style={styles.serviceCheck}>
-                    <Ionicons name="checkmark-circle" size={20} color={colors.gold} />
-                  </View>
-                )}
+        {/* ══════════════ MES VIEW ══════════════ */}
+        {viewMode === 'mes' && (
+          <View style={styles.calCard}>
+            <View style={styles.calNavRow}>
+              <TouchableOpacity onPress={() => handleMonthNav(-1)} style={styles.calNavBtn}>
+                <Ionicons name="chevron-back" size={18} color={colors.gray600} />
               </TouchableOpacity>
-            );
-          })}
-        </SectionCard>
+              <Text style={styles.calNavTitle}>{capMonth(calMonth)} {calYear}</Text>
+              <TouchableOpacity onPress={() => handleMonthNav(1)} style={styles.calNavBtn}>
+                <Ionicons name="chevron-forward" size={18} color={colors.gray600} />
+              </TouchableOpacity>
+            </View>
 
-        {/* Time Slots — visible once a service is selected */}
-        {selectedService && (
-          <View style={styles.slotsSection}>
-            <Text style={styles.slotsSectionTitle}>Horarios disponibles</Text>
-            <Text style={styles.slotsSectionSubtitle}>
-              Se muestran solo los espacios libres aprobables por la estilista
-            </Text>
-            <View style={styles.slotsGrid}>
-              {availableSlots.map((slot) => (
-                <TimeSlotButton
-                  key={slot.startTime}
-                  slot={slot}
-                  isSelected={selectedSlot?.startTime === slot.startTime}
-                  onPress={() => handleSlotSelect(slot)}
-                />
+            <View style={styles.dowRow}>
+              {['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => (
+                <Text key={d} style={styles.dowText}>{d}</Text>
               ))}
             </View>
+
+            <View style={styles.monthGrid}>
+              {monthGrid.map((day, idx) => {
+                if (day === null) return <View key={`e${idx}`} style={styles.monthCell} />;
+                const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const isSelected = dateStr === selectedDate;
+                const isToday = dateStr === todayStr;
+                const free = countFreeSlots(dateStr);
+                const dotColor = getDotColor(free);
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.monthCell, isSelected && styles.monthCellSelected]}
+                    onPress={() => { handleDateSelect(dateStr); setViewMode('dia'); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.monthDay,
+                      isSelected && styles.monthDaySelected,
+                      isToday && !isSelected && { color: colors.gold, fontWeight: '700' as const },
+                    ]}>{day}</Text>
+                    <View style={[styles.dot, { backgroundColor: dotColor }]} />
+                    <Text style={[styles.monthFree, isSelected && { color: colors.white + 'BB' }]}>
+                      {free === 0 ? '' : free}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.statusConfirmed }]} />
+                <Text style={styles.legendText}>4+ libres</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.statusPending }]} />
+                <Text style={styles.legendText}>1-3 libres</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: colors.error }]} />
+                <Text style={styles.legendText}>Lleno</Text>
+              </View>
+            </View>
           </View>
         )}
 
-        {/* Summary card */}
-        {selectedService && selectedSlot && (
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>Resumen de solicitud</Text>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Servicio:</Text>
-              <Text style={styles.summaryValue}>{selectedService.name}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Duración estimada:</Text>
-              <Text style={styles.summaryValue}>{selectedService.duration_minutes} minutos</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Hora elegida:</Text>
-              <Text style={styles.summaryValue}>
-                {formatDateShort(selectedDate)} · {selectedSlot.startTime} pm
+        {/* ══════════════ SEMANA VIEW (Accordion) ══════════════ */}
+        {viewMode === 'semana' && (
+          <View style={styles.calCard}>
+            <View style={styles.calNavRow}>
+              <TouchableOpacity onPress={() => handleWeekShift(-1)} style={styles.calNavBtn}>
+                <Ionicons name="chevron-back" size={18} color={colors.gray600} />
+              </TouchableOpacity>
+              <Text style={styles.calNavTitle}>
+                {weekDates[0]?.dayNum}–{weekDates[weekDates.length - 1]?.dayNum} {capMonth(selDateObj.getMonth())}
               </Text>
+              <TouchableOpacity onPress={() => handleWeekShift(1)} style={styles.calNavBtn}>
+                <Ionicons name="chevron-forward" size={18} color={colors.gray600} />
+              </TouchableOpacity>
             </View>
 
-            <PrimaryButton label="Solicitar cita" onPress={handleSubmit} style={styles.submitButton} />
+            {weekAvailability.map((day) => {
+              const isExpanded = expandedDay === day.date;
+              const freeSlots = day.slots.filter((s) => s.isAvailable);
+              const dotColor = getDotColor(day.freeCount);
+              const morningSlots = freeSlots.filter((s) => parseInt(s.startTime) < 12);
+              const afternoonSlots = freeSlots.filter((s) => parseInt(s.startTime) >= 12);
 
-            <Text style={styles.disclaimer}>
-              La cita queda pendiente hasta que Jaquelina la apruebe.
-            </Text>
+              return (
+                <View key={day.date}>
+                  {/* Collapsed row */}
+                  <TouchableOpacity
+                    style={[styles.weekRow, isExpanded && styles.weekRowExpanded]}
+                    onPress={() => {
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                      setExpandedDay(isExpanded ? null : day.date);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.weekDayCol}>
+                      <Text style={[styles.weekDayLabel, isExpanded && { color: colors.white }]}>{day.dayLabel}</Text>
+                      <Text style={[styles.weekDayNum, isExpanded && { color: colors.white }]}>{day.dayNum}</Text>
+                    </View>
+                    <View style={styles.weekBarCol}>
+                      <View style={styles.weekBarBg}>
+                        <View style={[styles.weekBarFill, { width: `${Math.min(100, (day.freeCount / 12) * 100)}%` as any, backgroundColor: dotColor }]} />
+                      </View>
+                    </View>
+                    <View style={[styles.weekFreeBadge, { backgroundColor: dotColor + '18' }]}>
+                      <Text style={[styles.weekFreeBadgeText, { color: dotColor }]}>
+                        {day.freeCount === 0 ? 'Lleno' : `${day.freeCount} libres`}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={isExpanded ? colors.white : colors.gray400}
+                    />
+                  </TouchableOpacity>
+
+                  {/* Expanded slot grid */}
+                  {isExpanded && (
+                    <View style={styles.accordionBody}>
+                      {freeSlots.length === 0 ? (
+                        <View style={styles.accordionEmpty}>
+                          <Ionicons name="close-circle-outline" size={24} color={colors.gray300} />
+                          <Text style={styles.accordionEmptyText}>Sin disponibilidad este día</Text>
+                        </View>
+                      ) : (
+                        <>
+                          {morningSlots.length > 0 && (
+                            <>
+                              <View style={styles.accordionGroupHeader}>
+                                <Ionicons name="sunny-outline" size={14} color={colors.gold} />
+                                <Text style={styles.accordionGroupLabel}>Mañana</Text>
+                              </View>
+                              <View style={styles.accordionGrid}>
+                                {morningSlots.map((slot) => {
+                                  const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
+                                  return (
+                                    <TouchableOpacity
+                                      key={slot.startTime}
+                                      style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
+                                      onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
+                                      <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            </>
+                          )}
+                          {afternoonSlots.length > 0 && (
+                            <>
+                              <View style={styles.accordionGroupHeader}>
+                                <Ionicons name="moon-outline" size={14} color={colors.info} />
+                                <Text style={styles.accordionGroupLabel}>Tarde</Text>
+                              </View>
+                              <View style={styles.accordionGrid}>
+                                {afternoonSlots.map((slot) => {
+                                  const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
+                                  return (
+                                    <TouchableOpacity
+                                      key={slot.startTime}
+                                      style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
+                                      onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
+                                      activeOpacity={0.7}
+                                    >
+                                      <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
+                                      <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
+
+        {/* ══════════════ DÍA VIEW ══════════════ */}
+        {viewMode === 'dia' && (
+          <View style={styles.calCard}>
+            <View style={styles.calNavRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  const d = new Date(selectedDate + 'T12:00:00');
+                  d.setDate(d.getDate() - 1);
+                  handleDateSelect(fmt(d));
+                }}
+                style={styles.calNavBtn}
+              >
+                <Ionicons name="chevron-back" size={18} color={colors.gray600} />
+              </TouchableOpacity>
+              <View style={styles.dayNavCenter}>
+                <Text style={styles.calNavTitle}>
+                  {['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'][selDateObj.getDay()]} {selDateObj.getDate()}
+                </Text>
+                <Text style={styles.dayNavSub}>{capMonth(selDateObj.getMonth())} {selDateObj.getFullYear()}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  const d = new Date(selectedDate + 'T12:00:00');
+                  d.setDate(d.getDate() + 1);
+                  handleDateSelect(fmt(d));
+                }}
+                style={styles.calNavBtn}
+              >
+                <Ionicons name="chevron-forward" size={18} color={colors.gray600} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Summary badge */}
+            <View style={styles.daySummaryRow}>
+              <View style={[styles.daySummaryBadge, { backgroundColor: colors.statusConfirmed + '15' }]}>
+                <Text style={[styles.daySummaryText, { color: colors.statusConfirmed }]}>
+                  {daySlots.filter((s) => s.isAvailable).length} libres
+                </Text>
+              </View>
+              <View style={[styles.daySummaryBadge, { backgroundColor: colors.error + '15' }]}>
+                <Text style={[styles.daySummaryText, { color: colors.error }]}>
+                  {daySlots.filter((s) => !s.isAvailable).length} ocupados
+                </Text>
+              </View>
+            </View>
+
+            {/* Hour timeline */}
+            {daySlots.map((slot) => {
+              const isAvail = slot.isAvailable;
+              const isSlotSelected = selectedSlot?.startTime === slot.startTime;
+              return (
+                <TouchableOpacity
+                  key={slot.startTime}
+                  style={[
+                    styles.daySlotRow,
+                    !isAvail && styles.daySlotOccupied,
+                    isSlotSelected && styles.daySlotSelected,
+                  ]}
+                  onPress={() => isAvail && handleSlotSelect(slot)}
+                  activeOpacity={isAvail ? 0.7 : 1}
+                  disabled={!isAvail}
+                >
+                  <Text style={[styles.daySlotTime, isSlotSelected && { color: colors.white }]}>{slot.startTime}</Text>
+                  <View style={styles.daySlotDivider} />
+                  <View style={styles.daySlotContent}>
+                    {isAvail ? (
+                      <View style={styles.daySlotAvail}>
+                        <Ionicons name="checkmark-circle" size={16} color={isSlotSelected ? colors.white : colors.statusConfirmed} />
+                        <Text style={[styles.daySlotAvailText, isSlotSelected && { color: colors.white }]}>Disponible</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.daySlotAvail}>
+                        <Ionicons name="lock-closed" size={14} color={colors.gray400} />
+                        <Text style={styles.daySlotOccText}>Ocupado</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.daySlotEnd, isSlotSelected && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
       </ScrollView>
+
+      {/* ══════════════ BOOKING WIZARD MODAL ══════════════ */}
+      <BookingWizardModal
+        visible={showWizard}
+        selectedDate={selectedDate}
+        selectedSlot={selectedSlot}
+        onClose={() => setShowWizard(false)}
+        onConfirm={() => { setShowWizard(false); setSelectedSlot(null); }}
+      />
     </SafeAreaView>
   );
 }
 
+// ── styles ───────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.black },
-  // Header with logo
   header: {
-    backgroundColor: colors.black,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
+    backgroundColor: colors.black, paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md, paddingBottom: spacing.xl,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
   },
   headerLogo: { width: 48, height: 48 },
   headerTextBlock: { flex: 1 },
   headerTitle: { ...typography.h2, color: colors.white },
   headerSubtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
-  // Scroll
   scrollView: {
-    flex: 1,
-    backgroundColor: colors.gray50,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
+    flex: 1, backgroundColor: colors.black,
+    borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl,
   },
-  scrollContent: { padding: spacing.xl, paddingBottom: spacing.huge, gap: spacing.lg },
-  // Week strip
-  weekStrip: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs },
-  dayCell: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.white,
-    minWidth: 48,
-    ...shadows.card,
+  scrollContent: { padding: spacing.lg, paddingBottom: spacing.huge, gap: spacing.lg },
+
+  // Search card
+  searchCard: {
+    backgroundColor: colors.gray900, borderRadius: radii.lg,
+    padding: spacing.lg, borderWidth: 1, borderColor: colors.gray800, gap: spacing.md,
   },
-  dayCellSelected: { backgroundColor: colors.black },
-  dayCellToday: { borderWidth: 1, borderColor: colors.gold },
-  dayLabel: { ...typography.caption, color: colors.gray600, marginBottom: spacing.xxs },
-  dayNum: { ...typography.subtitle, color: colors.gray900 },
-  dayTextSelected: { color: colors.white },
-  dayNumToday: { color: colors.gold },
-  // Services
-  serviceOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray200,
-    gap: spacing.sm,
+  searchHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  searchTitle: { ...typography.subtitle, color: colors.white },
+  filterRow: { flexDirection: 'row', gap: spacing.sm },
+  filterChip: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.xs, paddingVertical: spacing.sm,
+    borderRadius: radii.md, backgroundColor: colors.gray800,
   },
-  serviceOptionActive: {
-    backgroundColor: colors.gold + '08',
-    marginHorizontal: -spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.sm,
-    borderBottomColor: 'transparent',
+  filterChipActive: { backgroundColor: colors.black },
+  filterChipText: { ...typography.caption, color: colors.gray400, fontWeight: '600' },
+  filterChipTextActive: { color: colors.white },
+
+  // Calendar card (shared)
+  calCard: {
+    backgroundColor: colors.gray900, borderRadius: radii.lg,
+    padding: spacing.md, borderWidth: 1, borderColor: colors.gray800, gap: spacing.sm,
   },
-  serviceOptionInfo: { flex: 1 },
-  serviceOptionName: { ...typography.subtitle, color: colors.gray900 },
-  serviceOptionNameActive: { color: colors.black, fontWeight: '700' },
-  serviceOptionMeta: { ...typography.caption, color: colors.gray500, marginTop: spacing.xxs },
-  serviceOptionPrice: { ...typography.subtitle, color: colors.gold },
-  serviceCheck: { marginLeft: spacing.xs },
-  // Slots
-  slotsSection: { gap: spacing.sm },
-  slotsSectionTitle: { ...typography.h3, color: colors.gray900 },
-  slotsSectionSubtitle: { ...typography.caption, color: colors.gray500, marginBottom: spacing.xs },
-  slotsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  // Summary
-  summaryCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-    ...shadows.card,
-    gap: spacing.sm,
+  calNavRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: spacing.xs,
   },
-  summaryTitle: { ...typography.h3, color: colors.gray900, marginBottom: spacing.xs },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray100,
+  calNavBtn: {
+    width: 32, height: 32, borderRadius: radii.full,
+    backgroundColor: colors.gray800, justifyContent: 'center', alignItems: 'center',
   },
-  summaryLabel: { ...typography.body, color: colors.gray600 },
-  summaryValue: { ...typography.subtitle, color: colors.gray900, textAlign: 'right', flex: 1, marginLeft: spacing.md },
-  submitButton: { marginTop: spacing.lg },
-  disclaimer: { ...typography.caption, color: colors.gray500, textAlign: 'center', marginTop: spacing.sm },
+  calNavTitle: { ...typography.subtitle, color: colors.white, fontSize: 15 },
+
+  // Month view
+  dowRow: { flexDirection: 'row', marginBottom: spacing.xxs },
+  dowText: { flex: 1, textAlign: 'center', ...typography.caption, color: colors.gray400, fontWeight: '600' },
+  monthGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  monthCell: { width: '14.28%' as any, alignItems: 'center', paddingVertical: 6, gap: 1 },
+  monthCellSelected: { backgroundColor: colors.black, borderRadius: radii.sm },
+  monthDay: { ...typography.bodySmall, color: colors.white, fontSize: 13 },
+  monthDaySelected: { color: colors.white, fontWeight: '700' },
+  dot: { width: 5, height: 5, borderRadius: 3 },
+  monthFree: { fontSize: 8, color: colors.gray400, fontWeight: '500' },
+  legendRow: {
+    flexDirection: 'row', justifyContent: 'center', gap: spacing.lg,
+    marginTop: spacing.xs, paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.gray800,
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { ...typography.caption, color: colors.gray500, fontSize: 10 },
+
+  // Week view (accordion)
+  weekRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.sm,
+    borderRadius: radii.md, borderBottomWidth: 1, borderBottomColor: colors.gray800,
+  },
+  weekRowExpanded: { backgroundColor: colors.black, borderBottomColor: 'transparent', borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
+  weekDayCol: { width: 40, alignItems: 'center' },
+  weekDayLabel: { ...typography.caption, color: colors.gray500 },
+  weekDayNum: { ...typography.subtitle, color: colors.white },
+  weekBarCol: { flex: 1, gap: 3 },
+  weekBarBg: { height: 6, backgroundColor: colors.gray800, borderRadius: 3, overflow: 'hidden' },
+  weekBarFill: { height: '100%' as any, borderRadius: 3 },
+  weekFreeBadge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radii.full },
+  weekFreeBadgeText: { fontSize: 10, fontWeight: '700' },
+
+  // Accordion body
+  accordionBody: {
+    backgroundColor: colors.gray900, paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    borderBottomLeftRadius: radii.md, borderBottomRightRadius: radii.md,
+    marginBottom: spacing.xs,
+  },
+  accordionEmpty: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
+  accordionEmptyText: { ...typography.bodySmall, color: colors.gray400 },
+  accordionGroupHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, marginTop: spacing.xs, marginBottom: spacing.xs },
+  accordionGroupLabel: { ...typography.caption, color: colors.gray500, fontWeight: '700', textTransform: 'uppercase', fontSize: 10 },
+  accordionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  accordionSlot: {
+    width: '31%' as any, alignItems: 'center', paddingVertical: spacing.sm,
+    backgroundColor: colors.gray800, borderRadius: radii.md, borderWidth: 1, borderColor: colors.gray700,
+  },
+  accordionSlotActive: { backgroundColor: colors.gold, borderColor: colors.gold },
+  accordionSlotTime: { ...typography.subtitle, color: colors.white, fontSize: 13 },
+  accordionSlotEnd: { ...typography.caption, color: colors.gray400, fontSize: 10 },
+
+  // Day view
+  dayNavCenter: { alignItems: 'center' },
+  dayNavSub: { ...typography.caption, color: colors.gray500, marginTop: 2 },
+  daySummaryRow: { flexDirection: 'row', gap: spacing.sm, justifyContent: 'center' },
+  daySummaryBadge: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radii.full },
+  daySummaryText: { ...typography.caption, fontWeight: '700' },
+  daySlotRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.sm,
+    borderRadius: radii.md, borderBottomWidth: 1, borderBottomColor: colors.gray800,
+  },
+  daySlotOccupied: { opacity: 0.45 },
+  daySlotSelected: { backgroundColor: colors.gold, borderBottomColor: 'transparent' },
+  daySlotTime: { ...typography.subtitle, color: colors.white, width: 50, fontSize: 13 },
+  daySlotDivider: { width: 1, height: 24, backgroundColor: colors.gray700 },
+  daySlotContent: { flex: 1 },
+  daySlotAvail: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  daySlotAvailText: { ...typography.bodySmall, color: colors.statusConfirmed, fontWeight: '600' },
+  daySlotOccText: { ...typography.bodySmall, color: colors.gray400 },
+  daySlotEnd: { ...typography.caption, color: colors.gray400, fontSize: 11 },
+
+
 });

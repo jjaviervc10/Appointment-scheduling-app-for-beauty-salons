@@ -19,14 +19,15 @@ export function SectionCard({ title, children, style }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.lg,
     padding: spacing.lg,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
   title: {
     ...typography.h3,
-    color: colors.gray900,
+    color: colors.white,
     marginBottom: spacing.md,
   },
 });

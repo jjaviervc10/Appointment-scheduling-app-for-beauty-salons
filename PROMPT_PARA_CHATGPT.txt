@@ -1,0 +1,351 @@
+===============================================================================
+PROMPT PARA ANÁLISIS DE FRONTEND - JAQUELINA LÓPEZ BARBER STUDIO
+===============================================================================
+
+Eres un experto en desarrollo frontend con React Native + Expo. Te voy a dar
+la información completa de una aplicación móvil de agendamiento de citas para
+un salón de belleza/barbería. Necesito que la analices a fondo.
+
+===============================================================================
+1. RESUMEN DEL PROYECTO
+===============================================================================
+
+Nombre: Jaquelina López Barber Studio
+Tipo: App móvil de agendamiento de citas con dos roles (dueña/cliente)
+Stack: React Native 0.81.5 + Expo SDK 54 + TypeScript strict + expo-router v6
+Backend previsto: Supabase (schema: 'booking') — actualmente usa datos mock
+Diseño: Premium dark/gold — headers negros, acentos dorados, cards blancos
+Estado: Fase 1 completada (frontend completo con mock data)
+Repositorio: https://github.com/jjaviervc10/Appointment-scheduling-app-for-beauty-salons
+
+===============================================================================
+2. DEPENDENCIAS (package.json)
+===============================================================================
+
+{
+  "name": "jaquelina-lopez-barber-studio",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~6.1.2",
+    "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.103.0",
+    "date-fns": "^4.1.0",
+    "expo": "~54.0.33",
+    "expo-constants": "~18.0.13",
+    "expo-linking": "~8.0.11",
+    "expo-router": "~6.0.23",
+    "expo-splash-screen": "~31.0.13",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.0",
+    "typescript": "~5.9.2"
+  }
+}
+
+===============================================================================
+3. CONFIGURACIÓN
+===============================================================================
+
+--- app.json ---
+{
+  "expo": {
+    "name": "Jaquelina López Barber Studio",
+    "slug": "jaquelina-lopez-barber-studio",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "jlbarber",
+    "splash": { "backgroundColor": "#1A1A1A" },
+    "web": { "favicon": "./assets/LogoJL.png", "bundler": "metro" },
+    "plugins": ["expo-router"]
+  }
+}
+
+--- tsconfig.json ---
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  }
+}
+
+===============================================================================
+4. ESTRUCTURA DE ARCHIVOS COMPLETA
+===============================================================================
+
+/
+├── app.json
+├── package.json
+├── tsconfig.json
+├── assets/
+│   ├── LogoJL.ico          (favicon original .ico)
+│   ├── LogoJL.png          (logo circular con fondo transparente)
+│   ├── LogoMejoradoJMiChipleras2.png  (logo landscape completo)
+│   ├── favicon.png
+│   ├── icon.png
+│   ├── adaptive-icon.png
+│   └── splash-icon.png
+├── app/
+│   ├── _layout.tsx         (Root Stack, headerShown:false, slide_from_right)
+│   ├── index.tsx           (Splash/brand con logo animado, 2 botones entrada)
+│   ├── (client)/
+│   │   ├── _layout.tsx     (Tabs: Inicio, Reservar, Mis citas)
+│   │   ├── home.tsx        (Bienvenida, servicios, CTA reservar, logout)
+│   │   ├── booking.tsx     (Week strip, selección servicio, time slots, resumen)
+│   │   └── my-appointments.tsx  (FlatList citas con AppointmentCard)
+│   └── (owner)/
+│       ├── _layout.tsx     (Tabs: Inicio, Calendario, Más + 6 hidden screens)
+│       ├── dashboard.tsx   (Stats, citas pendientes accept/reject, agenda)
+│       ├── calendar.tsx    (WeekCalendarView compartido, navega a day-detail)
+│       ├── more.tsx        (Menú: disponibilidad, incidencias, clientes, mensajes, config, logout)
+│       ├── day-detail.tsx  (Vista operativa del día: citas, bloques, incidencias, modal crear bloque)
+│       ├── availability.tsx (4 tabs inline: Agenda/Disponibilidad/Bloqueos/Incidencias)
+│       ├── incidents.tsx   (Lista incidencias, formulario nueva, clientes afectados)
+│       ├── clients.tsx     (Lista clientes con búsqueda, avatars iniciales)
+│       ├── messages.tsx    (Mensajes WhatsApp con status delivery)
+│       └── settings.tsx    (Config negocio: nombre, timezone, duración slot, buffer, notificaciones)
+└── src/
+    ├── lib/
+    │   └── supabase.ts     (Cliente Supabase con AsyncStorage, schema: 'booking')
+    ├── theme/
+    │   ├── tokens.ts       (colors, spacing, radii, shadows, typography)
+    │   └── index.ts        (re-export + statusColors + statusLabels mappings)
+    ├── types/
+    │   ├── enums.ts        (AppointmentStatus, UserRole, TimeBlockType, etc.)
+    │   ├── database.ts     (Interfaces para cada tabla: Profile, Service, Appointment, etc.)
+    │   └── models.ts       (ViewModels: AppointmentViewModel, DaySummary, TimeSlot, etc.)
+    ├── services/
+    │   ├── mock-data.ts    (MOCK_SERVICES, MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS, etc.)
+    │   ├── appointments.ts (fetchByDate, fetchPending, fetchUpcoming, updateStatus, create)
+    │   ├── availability.ts (fetchSlots, fetchWeekSummary, fetchTimeBlocks, fetchWeeklyAvailability)
+    │   └── incidents.ts    (fetchAll, fetchActive, create, resolve)
+    ├── hooks/
+    │   ├── useAppointments.ts (useAppointmentsByDate, usePendingAppointments, useUpcomingAppointments)
+    │   └── useAuth.ts      (mock auth con switchRole owner/client)
+    └── components/
+        ├── appointments/
+        │   └── AppointmentCard.tsx  (default/featured/owner variants)
+        ├── availability/
+        │   └── TimeBlockCard.tsx    (icono+color por tipo, horario, notas, recurrencia)
+        ├── calendar/
+        │   ├── CalendarDayCell.tsx   (día con barra ocupación green/gold/red)
+        │   ├── TimeSlotButton.tsx    (pill seleccionable para booking)
+        │   ├── WeekCalendarView.tsx  (componente compartido: nav semanas + grid + resumen)
+        │   └── WeeklyCalendarStrip.tsx (strip horizontal Lun-Dom)
+        ├── incidents/
+        │   ├── IncidentCard.tsx      (severity badge, descripción, acciones)
+        │   └── IncidentsInlineView.tsx (vista embebida para tab de availability)
+        └── ui/
+            ├── EmptyState.tsx
+            ├── LoadingState.tsx
+            ├── PrimaryButton.tsx     (gold bg, black text, optional icon)
+            ├── SecondaryButton.tsx    (outlined)
+            ├── ScreenContainer.tsx
+            ├── SectionCard.tsx        (white card con título)
+            └── StatusChip.tsx         (chip coloreado por status)
+
+===============================================================================
+5. SISTEMA DE DISEÑO (TOKENS)
+===============================================================================
+
+COLORES:
+- Brand: black=#1A1A1A, gold=#C8A84E, goldLight=#E5D5A0, goldDark=#A68A3E
+- Neutrals: white, gray50-gray900 (escala Material Design)
+- Semantic: success=#2E7D32, warning=#F57F17, error=#C62828, info=#1565C0
+- Status appointment chips: pending(amber), confirmed(green), cancelled(red),
+  reschedule(blue), completed(gray), noShow(purple), awaitingClient(orange),
+  rejected(darkRed) — cada uno con versión texto y background
+
+SPACING: xxs:2, xs:4, sm:8, md:12, lg:16, xl:20, xxl:24, xxxl:32, huge:48
+
+RADII: sm:6, md:10, lg:14, xl:20, full:999
+
+SHADOWS:
+- card: offset(0,2), opacity:0.08, radius:8, elevation:3
+- cardHover: offset(0,4), opacity:0.12, radius:12, elevation:5
+- header: offset(0,2), opacity:0.15, radius:4, elevation:4
+
+TYPOGRAPHY (fontSize/fontWeight/lineHeight):
+- h1: 28/700/34, h2: 22/700/28, h3: 18/600/24
+- subtitle: 16/600/22, body: 15/400/21, bodySmall: 13/400/18
+- caption: 11/500/15, button: 16/600/22, buttonSmall: 14/600/18, tabLabel: 11/500/14
+
+===============================================================================
+6. SISTEMA DE TIPOS (TypeScript)
+===============================================================================
+
+--- Enums ---
+AppointmentStatus: 'pending_owner_approval' | 'rejected_by_owner' | 'confirmed_by_owner' |
+  'awaiting_client_confirmation' | 'client_confirmed' | 'client_cancelled' |
+  'owner_cancelled' | 'reschedule_required' | 'completed' | 'no_show'
+
+UserRole: 'owner' | 'client'
+DayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6
+TimeBlockType: 'comida' | 'escuela' | 'descanso' | 'mandado' | 'otro'
+IncidentSeverity: 'low' | 'medium' | 'high' | 'emergency'
+MessageChannel: 'whatsapp' | 'sms' | 'push'
+OutboundMessageStatus: 'queued' | 'sent' | 'delivered' | 'read' | 'failed'
+InboundMessageIntent: 'confirm' | 'cancel' | 'reschedule' | 'unknown'
+
+--- Database Types (alineados con booking.* schema en Supabase) ---
+Profile, BusinessSettings, Client, Service, WeeklyAvailability,
+TimeBlock, Incident, Appointment, AppointmentStatusHistory,
+OutboundMessage, InboundMessage, NotificationEvent, MessageTemplate
+
+--- View Models ---
+AppointmentViewModel: id, clientName, clientPhone, serviceName, durationMinutes, status, startAt, endAt, notes
+DaySummary: date, totalAppointments, confirmedCount, pendingCount, blocksCount, hasIncident, occupationPercent
+TimeSlot: startTime, endTime, isAvailable
+DayDetailViewModel: date, appointments, timeBlocks, incidents, availableFrom, availableTo
+
+===============================================================================
+7. SERVICIOS (SERVICE LAYER)
+===============================================================================
+
+Todos los servicios actualmente devuelven MOCK DATA. Cada función tiene un
+TODO para reemplazar con queries reales a Supabase.
+
+appointments.ts:
+  - fetchAppointmentsByDate(date) → AppointmentViewModel[]
+  - fetchPendingAppointments() → AppointmentViewModel[]
+  - fetchUpcomingAppointments() → AppointmentViewModel[]
+  - updateAppointmentStatus(id, status, reason?) → void
+  - createAppointmentRequest({clientId, serviceId, startAt, endAt}) → {id}
+
+availability.ts:
+  - fetchAvailableSlots(date, serviceId) → TimeSlot[]
+  - fetchWeekSummary(weekStartDate) → DaySummary[]
+  - fetchTimeBlocks(date) → TimeBlock[]
+  - createTimeBlock(block) → {id}
+  - fetchWeeklyAvailability() → WeeklyAvailability[] (Lun-Sáb hardcoded)
+  - updateWeeklyAvailability(dayOfWeek, startTime, endTime, isActive) → void
+
+incidents.ts:
+  - fetchIncidents() → Incident[]
+  - fetchActiveIncidents() → Incident[]
+  - createIncident(incident) → {id}
+  - resolveIncident(id) → void
+
+===============================================================================
+8. MOCK DATA
+===============================================================================
+
+SERVICIOS (4):
+  - Corte de cabello: 45 min, $250, buffer 15 min
+  - Peinado especial: 60 min, $400, buffer 10 min
+  - Tinte para barba: 30 min, $200, buffer 10 min
+  - Corte de barba: 30 min, $150, buffer 10 min
+
+CITAS (4):
+  - Ana López → Corte de cabello, mañana 12:45, status: pending_owner_approval
+  - Carlos Méndez → Corte de cabello, hoy 09:00, status: client_confirmed
+  - Lucía Ramírez → Tinte completo, hoy 10:30, status: confirmed_by_owner
+  - Martha Ruiz → Peinado especial, hoy 16:00, status: client_confirmed
+
+BLOQUES (2):
+  - Comida: hoy 14:00-15:00, recurrente
+  - Escuela hijos: pasado mañana 08:00-09:00, nota "Junta de padres"
+
+INCIDENCIAS (1):
+  - Imprevisto familiar: +3 días, 12:00-17:00, severity: high, afecta 2 citas
+
+TIME SLOTS PARA CLIENTE (7 slots):
+  09:00, 09:45, 10:30(no disponible), 12:00, 12:45, 16:00, 16:45
+
+DISPONIBILIDAD SEMANAL:
+  Lun-Jue: 09:00-18:00, Vie: 09:00-17:00, Sáb: 10:00-14:00, Dom: cerrado
+
+===============================================================================
+9. NAVEGACIÓN (expo-router file-based)
+===============================================================================
+
+/ (index.tsx)
+  ├── Splash animado con logo
+  ├── "Reservar ahora" → /(client)/home
+  └── "Panel del estudio" → /(owner)/dashboard
+
+/(client)/ [Tab Layout]
+  ├── home (tab "Inicio")
+  ├── booking (tab "Reservar")
+  └── my-appointments (tab "Mis citas")
+
+/(owner)/ [Tab Layout]
+  ├── dashboard (tab visible "Inicio")
+  ├── calendar (tab visible "Calendario")
+  ├── more (tab visible "Más")
+  ├── day-detail (hidden, params: {date})
+  ├── availability (hidden)
+  ├── incidents (hidden)
+  ├── clients (hidden)
+  ├── messages (hidden)
+  └── settings (hidden)
+
+NOTA: availability.tsx tiene 4 tabs inline propios (Agenda/Disponibilidad/Bloqueos/Incidencias)
+que NO navegan — se renderizan en la misma pantalla. El tab Agenda muestra
+WeekCalendarView. El tab Incidencias muestra IncidentsInlineView.
+
+===============================================================================
+10. PATRONES DE UI/UX IMPLEMENTADOS
+===============================================================================
+
+- Headers negros con logo circular dorado (LogoJL.png) en pantallas del cliente
+- Cards blancos con shadows sutiles sobre fondo gray50
+- Week strip horizontal Lun-Sáb con día seleccionado en negro
+- Time picker unificado "Desde/Hasta" con auto-progresión y horas deshabilitadas
+- Hour options: 08:00 a 20:00 en incrementos de 30 min (25 opciones)
+- Booking flow: single-scroll (servicio siempre visible, slots aparecen al seleccionar)
+- Block creation: modal bottom-sheet con tipo, etiqueta, horario
+- Status chips coloreados por estado de cita
+- Bar chart preview para vista semanal de disponibilidad
+- Animated splash screen con fade-in del logo
+- Platform-aware useNativeDriver (false en web, true en native)
+
+===============================================================================
+11. PENDIENTE PARA FASE 2+
+===============================================================================
+
+- [ ] Autenticación real con Supabase Auth (login/register con teléfono)
+- [ ] Reemplazar TODOS los mock data con queries reales a Supabase
+- [ ] React Query / TanStack Query para cache y sync
+- [ ] Zustand para estado global (auth, settings)
+- [ ] Time slots dinámicos basados en disponibilidad del dueño
+- [ ] Pull-to-refresh en listas
+- [ ] Error boundaries
+- [ ] Integración WhatsApp Business API para notificaciones
+- [ ] Push notifications con expo-notifications
+- [ ] Validación de formularios
+- [ ] Animaciones de transición entre tabs
+- [ ] Tests unitarios y de integración
+- [ ] Skeleton loaders en lugar de spinner
+
+===============================================================================
+12. DEPLOY
+===============================================================================
+
+- Local: `npx expo start --web --port 8083`
+- Build web: `expo export -p web` (output: /dist)
+- Deploy: Netlify conectado al repo de GitHub (auto-deploy en push a main)
+- Build command en Netlify: `expo export -p web`
+- Publish directory: `dist`
+- Install: usar `-- --legacy-peer-deps` para resolver conflictos de peer deps
+
+===============================================================================
+FIN DEL PROMPT
+===============================================================================

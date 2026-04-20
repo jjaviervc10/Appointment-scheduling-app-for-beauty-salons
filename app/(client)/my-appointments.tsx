@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    backgroundColor: colors.gray50,
+    backgroundColor: colors.black,
     borderTopLeftRadius: radii.xl,
     borderTopRightRadius: radii.xl,
   },
@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     ...typography.h3,
-    color: colors.gray900,
+    color: colors.white,
     marginBottom: spacing.md,
   },
 });

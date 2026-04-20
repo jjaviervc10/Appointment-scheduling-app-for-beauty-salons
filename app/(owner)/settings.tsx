@@ -7,13 +7,11 @@ import {
   TouchableOpacity,
   TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../src/theme';
+import { TopHeader } from '../../src/components/layout/TopHeader';
 
 export default function SettingsScreen() {
-  const router = useRouter();
   const [businessName, setBusinessName] = useState('Jaquelina López Barber Studio');
   const [slotDuration, setSlotDuration] = useState('45');
   const [buffer, setBuffer] = useState('15');
@@ -21,16 +19,11 @@ export default function SettingsScreen() {
   const [timezone, setTimezone] = useState('America/Mexico_City');
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.white} />
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Configuración</Text>
-          <Text style={styles.headerSubtitle}>Ajustes del negocio</Text>
-        </View>
-      </View>
+    <View style={styles.container}>
+      <TopHeader
+        title="Configuración"
+        subtitle="Ajustes del negocio"
+      />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* Business Info */}
@@ -133,56 +126,42 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.black },
-  header: {
-    backgroundColor: colors.black,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: { marginRight: spacing.md, padding: spacing.xs },
-  headerContent: { flex: 1 },
-  headerTitle: { ...typography.h2, color: colors.white },
-  headerSubtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
+  container: { flex: 1, backgroundColor: colors.black },
   scrollView: {
     flex: 1,
-    backgroundColor: colors.gray50,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
   },
-  scrollContent: { padding: spacing.xl, paddingBottom: spacing.huge, gap: spacing.xl },
+  scrollContent: { padding: spacing.xxl, paddingBottom: spacing.huge, gap: spacing.xl },
   sectionCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.lg,
     padding: spacing.xl,
     gap: spacing.lg,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
-  sectionTitle: { ...typography.h3, color: colors.gray900 },
+  sectionTitle: { ...typography.h3, color: colors.white },
   field: { gap: spacing.xs },
   fieldLabel: {
     ...typography.caption,
-    color: colors.gray600,
+    color: colors.gray400,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   textInput: {
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.gray800,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     ...typography.body,
-    color: colors.gray900,
+    color: colors.white,
   },
   readonlyField: {
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.gray800,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
@@ -190,7 +169,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  readonlyText: { ...typography.body, color: colors.gray600 },
+  readonlyText: { ...typography.body, color: colors.gray400 },
   row: { flexDirection: 'row', gap: spacing.md },
   optionRow: {
     flexDirection: 'row',
@@ -198,10 +177,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray100,
+    borderBottomColor: colors.gray800,
   },
   optionInfo: { flex: 1, marginRight: spacing.md },
-  optionLabel: { ...typography.subtitle, color: colors.gray900, fontSize: 14 },
+  optionLabel: { ...typography.subtitle, color: colors.white, fontSize: 14 },
   optionDesc: { ...typography.caption, color: colors.gray500, marginTop: spacing.xxs },
   toggleOn: {
     backgroundColor: colors.statusConfirmedBg,
@@ -221,9 +200,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.sm,
-    backgroundColor: colors.infoLight,
+    backgroundColor: colors.gray900,
     borderRadius: radii.md,
     padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
-  infoText: { ...typography.bodySmall, color: colors.info, flex: 1 },
+  infoText: { ...typography.bodySmall, color: colors.gray400, flex: 1 },
 });

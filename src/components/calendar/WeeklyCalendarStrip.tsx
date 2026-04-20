@@ -85,9 +85,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.md,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     minWidth: 48,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
   selectedCell: {
     backgroundColor: colors.black,
@@ -98,12 +99,12 @@ const styles = StyleSheet.create({
   },
   dayLabel: {
     ...typography.caption,
-    color: colors.gray600,
+    color: colors.gray400,
     marginBottom: spacing.xxs,
   },
   dayNum: {
     ...typography.subtitle,
-    color: colors.gray900,
+    color: colors.white,
   },
   selectedText: {
     color: colors.white,

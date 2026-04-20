@@ -1,48 +1,56 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../src/theme';
-
-const MOCK_CLIENTS = [
-  { id: 'c1', name: 'Ana López', phone: '+52 1 555 1234', totalAppts: 12, lastVisit: '2026-04-05' },
-  { id: 'c2', name: 'Carlos Méndez', phone: '+52 1 555 5678', totalAppts: 8, lastVisit: '2026-04-12' },
-  { id: 'c3', name: 'Lucía Ramírez', phone: '+52 1 555 9012', totalAppts: 5, lastVisit: '2026-04-10' },
-  { id: 'c4', name: 'Martha Ruiz', phone: '+52 1 555 3456', totalAppts: 15, lastVisit: '2026-04-11' },
-  { id: 'c5', name: 'María García', phone: '+52 1 555 7890', totalAppts: 3, lastVisit: '2026-03-28' },
-];
+import { TopHeader } from '../../src/components/layout/TopHeader';
+import { MOCK_CLIENTS } from '../../src/services/mock-data';
 
 export default function ClientsScreen() {
-  const router = useRouter();
+  const [search, setSearch] = useState('');
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return MOCK_CLIENTS;
+    const q = search.toLowerCase();
+    return MOCK_CLIENTS.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q),
+    );
+  }, [search]);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={colors.white} />
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>Clientes</Text>
-          <Text style={styles.headerSubtitle}>{MOCK_CLIENTS.length} clientes registrados</Text>
-        </View>
-      </View>
+    <View style={styles.container}>
+      <TopHeader
+        title="Clientes"
+        subtitle={`${filtered.length} clientes${search ? ' encontrados' : ' registrados'}`}
+      />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* Search placeholder */}
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={colors.gray500} />
-          <Text style={styles.searchPlaceholder}>Buscar cliente...</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar cliente..."
+            placeholderTextColor={colors.gray400}
+            value={search}
+            onChangeText={setSearch}
+            autoCorrect={false}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={18} color={colors.gray400} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Client list */}
-        {MOCK_CLIENTS.map((client) => (
+        {filtered.map((client) => (
           <TouchableOpacity key={client.id} style={styles.clientCard} activeOpacity={0.7}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>
@@ -60,50 +68,37 @@ export default function ClientsScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.black },
-  header: {
-    backgroundColor: colors.black,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: { marginRight: spacing.md, padding: spacing.xs },
-  headerContent: { flex: 1 },
-  headerTitle: { ...typography.h2, color: colors.white },
-  headerSubtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
+  container: { flex: 1, backgroundColor: colors.black },
   scrollView: {
     flex: 1,
-    backgroundColor: colors.gray50,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
   },
-  scrollContent: { padding: spacing.xl, paddingBottom: spacing.huge, gap: spacing.sm },
+  scrollContent: { padding: spacing.xxl, paddingBottom: spacing.huge, gap: spacing.sm },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.md,
     padding: spacing.md,
     marginBottom: spacing.md,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
-  searchPlaceholder: { ...typography.body, color: colors.gray400 },
+  searchInput: { ...typography.body, color: colors.white, flex: 1, padding: 0 },
   clientCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.md,
     padding: spacing.lg,
     gap: spacing.md,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
   avatar: {
     width: 44,
@@ -115,7 +110,7 @@ const styles = StyleSheet.create({
   },
   avatarText: { ...typography.buttonSmall, color: colors.gold, fontSize: 14 },
   clientInfo: { flex: 1 },
-  clientName: { ...typography.subtitle, color: colors.gray900 },
-  clientPhone: { ...typography.bodySmall, color: colors.gray600, marginTop: spacing.xxs },
+  clientName: { ...typography.subtitle, color: colors.white },
+  clientPhone: { ...typography.bodySmall, color: colors.gray400, marginTop: spacing.xxs },
   clientMeta: { ...typography.caption, color: colors.gray500, marginTop: spacing.xxs },
 });

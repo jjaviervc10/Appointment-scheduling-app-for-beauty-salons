@@ -14,7 +14,7 @@ export function ScreenContainer({ children, style }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.gray50,
+    backgroundColor: colors.black,
     paddingHorizontal: spacing.xl,
   },
 });

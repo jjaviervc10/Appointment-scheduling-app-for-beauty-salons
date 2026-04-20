@@ -26,7 +26,7 @@ export function TimeSlotButton({ slot, isSelected, onPress }: Props) {
 const styles = StyleSheet.create({
   button: {
     borderWidth: 1,
-    borderColor: colors.gray300,
+    borderColor: colors.gray700,
     borderRadius: radii.md,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
   },
   text: {
     ...typography.buttonSmall,
-    color: colors.gray800,
+    color: colors.white,
   },
   selectedText: {
     color: colors.white,

@@ -28,7 +28,7 @@ const styles = StyleSheet.create({
   },
   title: {
     ...typography.h3,
-    color: colors.gray700,
+    color: colors.gray400,
     marginTop: spacing.lg,
   },
   message: {

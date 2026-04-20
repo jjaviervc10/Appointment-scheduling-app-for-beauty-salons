@@ -53,12 +53,12 @@ export function IncidentCard({ incident, showActions }: Props) {
       {showActions && !incident.is_resolved && (
         <View style={styles.actions}>
           <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
-            <Ionicons name="notifications-outline" size={14} color={colors.white} />
+            <Ionicons name="send-outline" size={14} color={colors.white} />
             <Text style={styles.actionBtnText}>Avisar</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.actionBtnOutline} activeOpacity={0.7}>
-            <Ionicons name="swap-horizontal-outline" size={14} color={colors.gray700} />
-            <Text style={styles.actionBtnOutlineText}>Reprogramar</Text>
+            <Ionicons name="calendar-outline" size={14} color={colors.gold} />
+            <Text style={[styles.actionBtnOutlineText, { color: colors.gold }]}>Reprogramar</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -148,8 +148,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.gray400,
+    borderWidth: 1.5,
+    borderColor: colors.gold,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: radii.sm,

@@ -70,24 +70,25 @@ export function CalendarDayCell({ summary, isToday, onPress }: Props) {
 const styles = StyleSheet.create({
   cell: {
     flex: 1,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray900,
     borderRadius: radii.sm,
     padding: spacing.xs,
     alignItems: 'center',
     minHeight: 70,
-    ...shadows.card,
+    borderWidth: 1,
+    borderColor: colors.gray800,
   },
   todayCell: {
     borderWidth: 2,
     borderColor: colors.gold,
   },
   closedCell: {
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.gray800,
     opacity: 0.6,
   },
   dayNum: {
     ...typography.subtitle,
-    color: colors.gray900,
+    color: colors.white,
     marginBottom: spacing.xxs,
   },
   todayText: {
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
   barContainer: {
     width: '100%',
     height: 4,
-    backgroundColor: colors.gray200,
+    backgroundColor: colors.gray700,
     borderRadius: 2,
     overflow: 'hidden',
     marginBottom: spacing.xxs,
@@ -107,7 +108,7 @@ const styles = StyleSheet.create({
   },
   countText: {
     ...typography.caption,
-    color: colors.gray600,
+    color: colors.gray400,
     fontSize: 10,
   },
   closedText: {

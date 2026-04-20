@@ -25,7 +25,7 @@ export function SecondaryButton({ label, onPress, style, disabled, icon }: Props
       disabled={disabled}
     >
       {icon && (
-        <Ionicons name={icon} size={18} color={colors.gray700} style={styles.icon} />
+        <Ionicons name={icon} size={18} color={colors.gray400} style={styles.icon} />
       )}
       <Text style={styles.text}>{label}</Text>
     </TouchableOpacity>
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
     borderWidth: 1,
-    borderColor: colors.gray400,
+    borderColor: colors.gray700,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
     borderRadius: radii.md,
@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   },
   text: {
     ...typography.button,
-    color: colors.gray700,
+    color: colors.gray400,
   },
   icon: {
     marginRight: spacing.sm,
