@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import { statusColors, statusLabels } from '../../theme';
@@ -187,6 +187,7 @@ function NowIndicator({ startHour, hourHeight }: { startHour: number; hourHeight
 }
 
 function AppointmentQuickActions({ appointment, onClose }: { appointment: AppointmentViewModel; onClose: () => void }) {
+  const { width: screenWidth } = useWindowDimensions();
   const sc = statusColors[appointment.status as keyof typeof statusColors] || { text: colors.gray600, bg: colors.gray200 };
   const label = statusLabels[appointment.status as keyof typeof statusLabels] || appointment.status;
 
@@ -201,7 +202,7 @@ function AppointmentQuickActions({ appointment, onClose }: { appointment: Appoin
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={modalStyles.overlay} onPress={onClose} activeOpacity={1}>
-        <View style={modalStyles.card}>
+        <View style={[modalStyles.card, { width: Math.min(360, screenWidth - 32) }]}>
           <View style={modalStyles.header}>
             <View style={modalStyles.headerInfo}>
               <Text style={modalStyles.clientName}>{appointment.clientName}</Text>

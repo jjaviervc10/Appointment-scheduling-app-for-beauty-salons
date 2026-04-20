@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 import { statusColors } from '../../theme';
@@ -20,6 +20,7 @@ const END_HOUR = 20;
 const COL_MIN_WIDTH = 120;
 const DAYS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const DAYS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const DAYS_MOBILE = ['Do', 'Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá'];
 
 function getMonday(d: Date): Date {
   const date = new Date(d);
@@ -35,6 +36,8 @@ function fmt(d: Date): string {
 }
 
 export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppointmentPress }: WeekViewProps) {
+  const { width: screenWidth } = useWindowDimensions();
+  const isMobile = screenWidth < 768;
   const monday = useMemo(() => getMonday(weekStart), [weekStart]);
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
@@ -87,9 +90,11 @@ export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppo
         {days.map((d) => {
           const isToday = fmt(d) === todayStr;
           return (
-            <View key={fmt(d)} style={[styles.dayHeader, isToday && styles.dayHeaderToday]}>
-              <Text style={[styles.dayName, isToday && styles.dayNameToday]}>{DAYS_ES[d.getDay()]}</Text>
-              <Text style={[styles.dayNum, isToday && styles.dayNumToday]}>{d.getDate()}</Text>
+            <View key={fmt(d)} style={[styles.dayHeader, isMobile && styles.dayHeaderMobile, isToday && styles.dayHeaderToday]}>
+              <Text style={[styles.dayName, isToday && styles.dayNameToday, isMobile && styles.dayNameMobile]}>
+                {isMobile ? DAYS_MOBILE[d.getDay()] : DAYS_ES[d.getDay()]}
+              </Text>
+              <Text style={[styles.dayNum, isToday && styles.dayNumToday, isMobile && styles.dayNumMobile]}>{d.getDate()}</Text>
             </View>
           );
         })}
@@ -115,7 +120,7 @@ export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppo
             const isToday = dateStr === todayStr;
 
             return (
-              <View key={dateStr} style={[styles.dayCol, isToday && styles.dayColToday]}>
+              <View key={dateStr} style={[styles.dayCol, isMobile && styles.dayColMobile, isToday && styles.dayColToday]}>
                 {/* Hour grid lines */}
                 {hours.map((hour) => (
                   <View key={hour} style={[styles.gridCell, { height: HOUR_HEIGHT }]} />
@@ -128,8 +133,8 @@ export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppo
                   const [eh, em] = block.end_time.split(':').map(Number);
                   const dur = (eh * 60 + em) - (sh * 60 + sm);
                   return (
-                    <View key={block.id} style={[styles.blockChip, { top, height: getHeight(dur) }]}>
-                      <Text style={styles.blockChipText} numberOfLines={1}>{block.label}</Text>
+                    <View key={block.id} style={[styles.blockChip, { top, height: getHeight(dur) }, isMobile && styles.blockChipMobile]}>
+                      <Text style={[styles.blockChipText, isMobile && styles.blockChipTextMobile]} numberOfLines={1}>{block.label}</Text>
                     </View>
                   );
                 })}
@@ -142,14 +147,14 @@ export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppo
                   return (
                     <TouchableOpacity
                       key={appt.id}
-                      style={[styles.apptChip, { top, height, backgroundColor: sc.bg, borderLeftColor: sc.text }]}
+                      style={[styles.apptChip, { top, height, backgroundColor: sc.bg, borderLeftColor: sc.text }, isMobile && styles.apptChipMobile]}
                       onPress={() => onAppointmentPress(appt.id)}
                       activeOpacity={0.7}
                     >
-                      <Text style={[styles.apptChipName, { color: sc.text }]} numberOfLines={1}>
+                      <Text style={[styles.apptChipName, { color: sc.text }, isMobile && styles.apptChipNameMobile]} numberOfLines={1}>
                         {appt.clientName}
                       </Text>
-                      <Text style={styles.apptChipTime} numberOfLines={1}>
+                      <Text style={[styles.apptChipTime, isMobile && styles.apptChipTimeMobile]} numberOfLines={1}>
                         {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
                       </Text>
                     </TouchableOpacity>
@@ -233,4 +238,14 @@ const styles = StyleSheet.create({
   },
   apptChipName: { ...typography.caption, fontWeight: '600', fontSize: 10 },
   apptChipTime: { ...typography.caption, color: colors.gray500, fontSize: 9 },
+  /* Mobile responsive overrides */
+  dayHeaderMobile: { minWidth: 0, paddingVertical: spacing.xs },
+  dayNameMobile: { fontSize: 9 },
+  dayNumMobile: { fontSize: 12 },
+  dayColMobile: { minWidth: 0 },
+  blockChipMobile: { left: 1, right: 1, paddingHorizontal: 2, paddingVertical: 1 },
+  blockChipTextMobile: { fontSize: 7 },
+  apptChipMobile: { left: 1, right: 1, borderLeftWidth: 2, paddingHorizontal: 2, paddingVertical: 1 },
+  apptChipNameMobile: { fontSize: 8 },
+  apptChipTimeMobile: { fontSize: 7 },
 });

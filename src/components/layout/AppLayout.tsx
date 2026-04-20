@@ -88,9 +88,11 @@ const styles = StyleSheet.create({
   mobileContainer: {
     flex: 1,
     backgroundColor: colors.black,
+    overflow: 'hidden',
   },
   mobileMain: {
     flex: 1,
+    overflow: 'hidden',
   },
   bottomBar: {
     flexDirection: 'row',
