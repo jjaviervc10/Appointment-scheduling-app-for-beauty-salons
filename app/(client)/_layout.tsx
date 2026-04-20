@@ -1,5 +1,5 @@
 import { Tabs, useRouter } from 'expo-router';
-import { TouchableOpacity, Alert, Platform } from 'react-native';
+import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
 
@@ -8,10 +8,7 @@ function LogoutTabButton(props: any) {
   return (
     <TouchableOpacity
       {...props}
-      onPress={(e) => {
-        e.preventDefault();
-        router.replace('/');
-      }}
+      onPress={() => router.replace('/')}
     />
   );
 }
@@ -66,7 +63,6 @@ export default function ClientLayout() {
         name="logout"
         options={{
           title: 'Salir',
-          href: null,
           tabBarIcon: ({ size }) => (
             <Ionicons name="log-out-outline" size={size} color={colors.error} />
           ),
