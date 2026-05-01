@@ -1,10 +1,21 @@
 import Constants from 'expo-constants';
 
+declare const process: {
+  env: {
+    EXPO_PUBLIC_API_BASE_URL?: string;
+    EXPO_PUBLIC_OWNER_SECRET?: string;
+  };
+};
+
+const BUILD_TIME_ENV = {
+  EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
+  EXPO_PUBLIC_OWNER_SECRET: process.env.EXPO_PUBLIC_OWNER_SECRET,
+};
+
 function readEnvVar(name: string): string | undefined {
-  const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  const processValue = processEnv?.[name];
-  if (processValue && processValue.trim().length > 0) {
-    return processValue;
+  const buildTimeValue = BUILD_TIME_ENV[name as keyof typeof BUILD_TIME_ENV];
+  if (buildTimeValue && buildTimeValue.trim().length > 0) {
+    return buildTimeValue;
   }
 
   const extra = Constants.expoConfig?.extra as Record<string, string | undefined> | undefined;
