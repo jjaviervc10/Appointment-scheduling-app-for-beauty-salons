@@ -77,8 +77,10 @@ export interface PublicBookingResponse {
 export interface PublicService {
   id: string;
   name: string;
+  description?: string | null;
   durationMinutes?: number;
   price?: number | null;
+  sortOrder?: number;
 }
 
 export interface PublicAvailabilitySlot {
@@ -88,22 +90,19 @@ export interface PublicAvailabilitySlot {
 
 export interface PublicServicesResponse {
   ok: true;
-  data: Array<{
+  services: Array<{
     id: string;
     name: string;
-    duration_minutes?: number;
+    description?: string | null;
+    durationMinutes?: number;
     price?: number | null;
+    sortOrder?: number;
   }>;
 }
 
 export interface PublicAvailabilityResponse {
   ok: true;
-  data: Array<{
-    slot_start_at?: string;
-    slot_end_at?: string;
-    slotStartAt?: string;
-    slotEndAt?: string;
-  }>;
+  slots: PublicAvailabilitySlot[];
 }
 
 export class HttpError extends Error {

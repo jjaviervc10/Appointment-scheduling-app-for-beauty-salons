@@ -191,6 +191,7 @@ const styles = StyleSheet.create({
     // width:'100%' ensures the content container fills the scroll view width
     // in React Native Web when the parent is a flex row child
     width: '100%',
+    flexGrow: 1,
     padding: spacing.md,
     gap: spacing.sm,
     paddingBottom: spacing.lg,
@@ -217,6 +218,7 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.gold,
     borderWidth: 1,
     borderColor: colors.gray800,
+    flexShrink: 0,
   },
   cardWorking: {
     borderColor: colors.gold,
@@ -237,6 +239,8 @@ const styles = StyleSheet.create({
   },
   cardLeftMobile: {
     flex: undefined,
+    flexShrink: 0,
+    minHeight: 40,
   },
   avatar: {
     width: 40,

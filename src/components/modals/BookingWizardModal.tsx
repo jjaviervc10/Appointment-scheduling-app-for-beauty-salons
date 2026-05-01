@@ -15,6 +15,7 @@ import { MOCK_SERVICES } from '../../services/mock-data';
 import { PrimaryButton } from '../ui/PrimaryButton';
 import type { Service } from '../../types/database';
 import type { TimeSlot } from '../../types/models';
+import { formatLocalDateTimeWithOffset } from '../../utils/date';
 
 interface Props {
   visible: boolean;
@@ -86,7 +87,7 @@ export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClos
     try {
       await onSubmit({
         serviceId: selectedService.id,
-        startAt: new Date(`${selectedDate}T${selectedSlot.startTime}:00`).toISOString(),
+        startAt: formatLocalDateTimeWithOffset(selectedDate, `${selectedSlot.startTime}:00`),
         notes,
       });
 

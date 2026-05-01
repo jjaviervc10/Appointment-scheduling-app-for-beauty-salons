@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../src/theme';
@@ -13,11 +13,11 @@ import { NewAppointmentModal } from '../../src/components/modals/NewAppointmentM
 import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
 import { IncidentModal } from '../../src/components/modals/IncidentModal';
 import {
-  MOCK_APPOINTMENTS,
   MOCK_TIME_BLOCKS,
-  getAppointmentsForDate,
-  getAppointmentsForRange,
 } from '../../src/services/mock-data';
+import { fetchAppointmentsByDate, fetchAppointmentsByRange } from '../../src/services/appointments';
+import type { AppointmentViewModel } from '../../src/types/models';
+import { formatLocalDateKey } from '../../src/utils/date';
 
 type AgendaTab = 'day' | 'week' | 'month' | 'availability' | 'blocks';
 
@@ -30,7 +30,7 @@ const TABS: { key: AgendaTab; label: string; icon: keyof typeof Ionicons.glyphMa
 ];
 
 function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
+  return formatLocalDateKey(d);
 }
 
 function getMonday(d: Date): Date {
@@ -53,15 +53,17 @@ export default function AgendaScreen() {
   const [showNewAppt, setShowNewAppt] = useState(false);
   const [showBlockTime, setShowBlockTime] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
+  const [dayAppointments, setDayAppointments] = useState<AppointmentViewModel[]>([]);
+  const [weekAppointments, setWeekAppointments] = useState<AppointmentViewModel[]>([]);
+  const [monthAppointments, setMonthAppointments] = useState<AppointmentViewModel[]>([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
+  const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
 
-  const dayAppointments = useMemo(
-    () => getAppointmentsForDate(fmt(selectedDate)),
-    [selectedDate]
-  );
+  const selectedDateKey = useMemo(() => fmt(selectedDate), [selectedDate]);
 
   const dayBlocks = useMemo(
-    () => MOCK_TIME_BLOCKS.filter(b => b.date === fmt(selectedDate)),
-    [selectedDate]
+    () => MOCK_TIME_BLOCKS.filter(b => b.date === selectedDateKey),
+    [selectedDateKey]
   );
 
   const weekEnd = useMemo(() => {
@@ -70,19 +72,49 @@ export default function AgendaScreen() {
     return end;
   }, [weekStart]);
 
-  const weekAppointments = useMemo(
-    () => getAppointmentsForRange(weekStart, weekEnd),
-    [weekStart, weekEnd]
-  );
+  const weekStartKey = useMemo(() => fmt(weekStart), [weekStart]);
+  const weekEndKey = useMemo(() => fmt(weekEnd), [weekEnd]);
+
+  const monthRange = useMemo(() => {
+    const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+    const end = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
+    return { start: fmt(start), end: fmt(end) };
+  }, [monthDate]);
 
   const weekBlocks = useMemo(
     () => {
-      const start = fmt(weekStart);
-      const end = fmt(weekEnd);
-      return MOCK_TIME_BLOCKS.filter(b => b.date >= start && b.date <= end);
+      return MOCK_TIME_BLOCKS.filter(b => b.date >= weekStartKey && b.date <= weekEndKey);
     },
-    [weekStart, weekEnd]
+    [weekStartKey, weekEndKey]
   );
+
+  const loadAppointments = useCallback(async () => {
+    setAppointmentsLoading(true);
+    setAppointmentsError(null);
+
+    try {
+      const [dayData, weekData, monthData] = await Promise.all([
+        fetchAppointmentsByDate(selectedDateKey),
+        fetchAppointmentsByRange(weekStartKey, weekEndKey),
+        fetchAppointmentsByRange(monthRange.start, monthRange.end),
+      ]);
+
+      setDayAppointments(dayData);
+      setWeekAppointments(weekData);
+      setMonthAppointments(monthData);
+    } catch (error) {
+      setAppointmentsError(error instanceof Error ? error.message : 'No se pudo cargar la agenda.');
+      setDayAppointments([]);
+      setWeekAppointments([]);
+      setMonthAppointments([]);
+    } finally {
+      setAppointmentsLoading(false);
+    }
+  }, [selectedDateKey, weekStartKey, weekEndKey, monthRange]);
+
+  useEffect(() => {
+    void loadAppointments();
+  }, [loadAppointments]);
 
   const getSubtitle = () => {
     switch (activeTab) {
@@ -105,6 +137,14 @@ export default function AgendaScreen() {
   };
 
   const renderContent = () => {
+    if (appointmentsLoading) {
+      return <Text style={styles.stateText}>Sincronizando agenda con backend...</Text>;
+    }
+
+    if (appointmentsError) {
+      return <Text style={[styles.stateText, styles.errorText]}>{appointmentsError}</Text>;
+    }
+
     switch (activeTab) {
       case 'day':
         return (
@@ -129,7 +169,7 @@ export default function AgendaScreen() {
         return (
           <MonthView
             date={monthDate}
-            appointments={MOCK_APPOINTMENTS}
+            appointments={monthAppointments}
             onMonthChange={setMonthDate}
             onDayPress={(d) => {
               setSelectedDate(d);
@@ -245,5 +285,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  stateText: {
+    padding: spacing.lg,
+    color: colors.gray400,
+    fontSize: 13,
+  },
+  errorText: {
+    color: colors.error,
   },
 });

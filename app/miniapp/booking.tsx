@@ -18,6 +18,7 @@ import {
 } from '../../src/services/bookingApi';
 import type { PublicAvailabilitySlot, PublicService } from '../../src/types/api';
 import { isHttpError } from '../../src/types/api';
+import { formatLocalDateKey, getIsoDateKey } from '../../src/utils/date';
 
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
@@ -25,7 +26,7 @@ function firstParam(value: string | string[] | undefined): string {
 }
 
 function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
+  return formatLocalDateKey(d);
 }
 
 function getWeekStart(dateInput: string): string {
@@ -45,6 +46,8 @@ function mapErrorMessage(status: number): string {
   if (status === 400) return 'Revisa nombre, celular y horario seleccionado.';
   if (status === 404) return 'Servicio no encontrado. Actualiza la mini app.';
   if (status === 409) return 'Ese horario ya no esta disponible. Elige otro.';
+  if (status === 413) return 'Las notas son demasiado largas. Reduce el texto.';
+  if (status === 422) return 'La cita debe solicitarse con al menos 30 minutos de anticipacion.';
   if (status === 429) return 'Demasiados intentos. Intenta en unos minutos.';
   if (status === 500) return 'Error inesperado. Intenta nuevamente.';
   return 'No se pudo enviar la solicitud.';
@@ -110,7 +113,7 @@ export default function MiniAppBookingScreen() {
       const slots = await getPublicAvailability(serviceId, weekStart);
       setAvailabilitySlots(slots);
 
-      const availableDates = Array.from(new Set(slots.map((slot) => fmt(new Date(slot.slotStartAt))))).sort();
+      const availableDates = Array.from(new Set(slots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort();
 
       if (availableDates.length === 0) {
         setSelectedDate(weekStart);
@@ -139,13 +142,13 @@ export default function MiniAppBookingScreen() {
 
   const days = useMemo(() => {
     return Array.from(
-      new Set(availabilitySlots.map((slot) => fmt(new Date(slot.slotStartAt))))
+      new Set(availabilitySlots.map((slot) => getIsoDateKey(slot.slotStartAt)))
     ).sort();
   }, [availabilitySlots]);
 
   const slots = useMemo(() => {
     return availabilitySlots
-      .filter((slot) => fmt(new Date(slot.slotStartAt)) === selectedDate)
+      .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
       .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime());
   }, [availabilitySlots, selectedDate]);
 

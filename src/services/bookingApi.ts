@@ -17,23 +17,16 @@ export async function createPublicBookingRequest(
   });
 }
 
-function asArray<T>(payload: unknown): T[] {
-  if (Array.isArray(payload)) return payload as T[];
-  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown[] }).data)) {
-    return (payload as { data: T[] }).data;
-  }
-  return [];
-}
-
 export async function getPublicServices(): Promise<PublicService[]> {
-  const response = await apiRequest<PublicServicesResponse | PublicServicesResponse['data']>('/api/public/services');
-  const rows = asArray<PublicServicesResponse['data'][number]>(response);
+  const response = await apiRequest<PublicServicesResponse>('/api/public/services');
 
-  return rows.map((row) => ({
+  return response.services.map((row) => ({
     id: row.id,
     name: row.name,
-    durationMinutes: row.duration_minutes,
+    description: row.description,
+    durationMinutes: row.durationMinutes,
     price: row.price,
+    sortOrder: row.sortOrder,
   }));
 }
 
@@ -42,18 +35,8 @@ export async function getPublicAvailability(
   weekStart: string
 ): Promise<PublicAvailabilitySlot[]> {
   const query = `serviceId=${encodeURIComponent(serviceId)}&weekStart=${encodeURIComponent(weekStart)}`;
-  const response = await apiRequest<PublicAvailabilityResponse | PublicAvailabilityResponse['data']>(
+  const response = await apiRequest<PublicAvailabilityResponse>(
     `/api/public/availability?${query}`
   );
-  const rows = asArray<PublicAvailabilityResponse['data'][number]>(response);
-
-  return rows
-    .map((row) => {
-      const slotStartAt = row.slotStartAt ?? row.slot_start_at;
-      const slotEndAt = row.slotEndAt ?? row.slot_end_at;
-
-      if (!slotStartAt || !slotEndAt) return null;
-      return { slotStartAt, slotEndAt };
-    })
-    .filter((slot): slot is PublicAvailabilitySlot => slot !== null);
+  return response.slots;
 }

@@ -5,6 +5,7 @@ import {
   approveOwnerAppointment,
   cancelOwnerAppointment,
   completeOwnerAppointment,
+  getOwnerAppointments,
   getOwnerPendingAppointments,
   getOwnerTodayAppointments,
   rejectOwnerAppointment,
@@ -20,6 +21,7 @@ function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel 
     id: row.id,
     clientName: row.clients?.full_name ?? 'Cliente',
     clientPhone: row.clients?.phone ?? '',
+    serviceId: row.services?.id,
     serviceName: row.services?.name ?? 'Servicio',
     durationMinutes:
       row.services?.duration_minutes ??
@@ -39,7 +41,16 @@ export async function fetchAppointmentsByDate(date: string): Promise<Appointment
     return remote.map(mapOwnerRowToViewModel);
   }
 
-  throw new Error(`No backend endpoint connected for owner appointments by date: ${date}`);
+  const remote = await getOwnerAppointments({ startDate: date, endDate: date });
+  return remote.map(mapOwnerRowToViewModel);
+}
+
+export async function fetchAppointmentsByRange(
+  startDate: string,
+  endDate: string
+): Promise<AppointmentViewModel[]> {
+  const remote = await getOwnerAppointments({ startDate, endDate });
+  return remote.map(mapOwnerRowToViewModel);
 }
 
 export async function fetchPendingAppointments(): Promise<AppointmentViewModel[]> {

@@ -17,13 +17,14 @@ import { MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS } from '../../src/services/mock-dat
 import { BookingWizardModal, type BookingSubmitInput } from '../../src/components/modals/BookingWizardModal';
 import type { TimeSlot } from '../../src/types/models';
 import { createPublicBookingRequest } from '../../src/services/bookingApi';
+import { formatLocalDateKey } from '../../src/utils/date';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
 // ── helpers ──────────────────────────────────────────────────────
-const fmt = (d: Date) => d.toISOString().split('T')[0];
+const fmt = (d: Date) => formatLocalDateKey(d);
 const WORK_START = 9;
 const WORK_END = 18;
 const SLOT_DURATION = 45;

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,8 +14,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import type { AppointmentViewModel } from '../../types/models';
 import { MOCK_APPOINTMENTS } from '../../services/mock-data';
-import { formatLocalDateKey } from '../../utils/date';
+import { formatLocalDateKey, formatLocalDateTimeWithOffset } from '../../utils/date';
 import { rescheduleOwnerAppointment } from '../../services/ownerApi';
+import { getPublicAvailability } from '../../services/bookingApi';
 
 /** Result returned to the dashboard after a successful POST /reschedule */
 export interface RescheduleSimulationResult {
@@ -39,12 +40,13 @@ interface Props {
   onSimulationComplete?: (result: RescheduleSimulationResult) => void;
 }
 
-const AVAILABLE_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+const FALLBACK_HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const DAY_NAMES_SHORT = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const DAY_NAMES_FULL = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'];
 const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 type CalView = 'day' | 'week' | 'month';
+type AvailableSlotMap = Record<string, string[]>;
 
 function fmt(d: Date): string { return formatLocalDateKey(d); }
 function addDays(d: Date, n: number): Date { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
@@ -59,14 +61,19 @@ function formatHour(h: number): string {
   return `${h > 12 ? h - 12 : h} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
-function getOccupiedSlots(date: string): Set<number> {
-  const set = new Set<number>();
-  MOCK_APPOINTMENTS.filter(a => fmt(a.startAt) === date).forEach(a => {
-    const startH = a.startAt.getHours();
-    const blocks = Math.ceil(a.durationMinutes / 60);
-    for (let i = 0; i < blocks; i++) set.add(startH + i);
-  });
-  return set;
+function formatTimeLabel(time: string): string {
+  const [hourRaw = '0', minuteRaw = '0'] = time.split(':');
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const base = formatHour(hour);
+  return minute > 0 ? base.replace(' ', `:${String(minute).padStart(2, '0')} `) : base;
+}
+
+function formatTimeCompact(time: string): string {
+  const [hourRaw = '0', minuteRaw = '0'] = time.split(':');
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  return `${hour > 12 ? hour - 12 : hour}${minute > 0 ? `:${String(minute).padStart(2, '0')}` : ''}${hour >= 12 ? 'p' : 'a'}`;
 }
 
 function getMonthDays(year: number, month: number): (Date | null)[][] {
@@ -97,20 +104,68 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
   const [calView, setCalView] = useState<CalView>('day');
   const [viewDate, setViewDate] = useState(() => addDays(new Date(), 1));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [selectedHour, setSelectedHour] = useState<number | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [availableSlots, setAvailableSlots] = useState<AvailableSlotMap>({});
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
 
   const weekStart = useMemo(() => getMonday(viewDate), [viewDate]);
+  const availabilityWeekKey = useMemo(() => fmt(weekStart), [weekStart]);
+
+  useEffect(() => {
+    if (!visible || !appointment?.serviceId) {
+      setAvailableSlots({});
+      setAvailabilityError(null);
+      setAvailabilityLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    setAvailabilityError(null);
+
+    getPublicAvailability(appointment.serviceId, availabilityWeekKey)
+      .then((slots) => {
+        if (cancelled) return;
+        const next: AvailableSlotMap = {};
+        slots.forEach((slot) => {
+          const start = new Date(slot.slotStartAt);
+          const dateKey = fmt(start);
+          const timeKey = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
+          next[dateKey] = [...(next[dateKey] ?? []), timeKey];
+        });
+        Object.keys(next).forEach((dateKey) => {
+          next[dateKey] = Array.from(new Set(next[dateKey])).sort();
+        });
+        setAvailableSlots(next);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const msg = error instanceof Error ? error.message : 'No se pudo cargar la disponibilidad.';
+        setAvailableSlots({});
+        setAvailabilityError(msg);
+      })
+      .finally(() => {
+        if (!cancelled) setAvailabilityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [availabilityWeekKey, appointment?.serviceId, visible]);
 
   const handleReschedule = async () => {
-    if (!appointment || !selectedDate || selectedHour === null) return;
+    if (!appointment || !selectedDate || !selectedTime) return;
     setIsSubmitting(true);
     setSubmitError(null);
-    // Build ISO 8601 with Mexico City standard offset (-06:00). Backend applies slot buffers.
-    const newStartAt = `${selectedDate}T${String(selectedHour).padStart(2, '0')}:00:00-06:00`;
+    const newStartAt = formatLocalDateTimeWithOffset(
+      selectedDate,
+      `${selectedTime}:00`
+    );
     try {
       const result = await rescheduleOwnerAppointment(appointment.id, {
         newStartAt,
@@ -139,7 +194,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     setCalView('day');
     setViewDate(addDays(new Date(), 1));
     setSelectedDate(null);
-    setSelectedHour(null);
+    setSelectedTime(null);
     setReason('');
     setNotifyClient(true);
     setIsSubmitting(false);
@@ -151,7 +206,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     onClose();
   };
 
-  const canConfirm = !!selectedDate && selectedHour !== null && !isSubmitting;
+  const canConfirm = !!selectedDate && !!selectedTime && !isSubmitting;
 
   if (!appointment) return null;
 
@@ -223,8 +278,10 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
             {/* === DAY VIEW === */}
             {calView === 'day' && (() => {
               const dateStr = fmt(viewDate);
-              const occupied = getOccupiedSlots(dateStr);
               const dayLabel = viewDate.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+              const backendSlots = availableSlots[dateStr] ?? [];
+              const fallbackSlots = FALLBACK_HOURS.map(h => `${String(h).padStart(2, '0')}:00`);
+              const slotTimes = appointment.serviceId ? backendSlots : fallbackSlots;
               return (
                 <>
                   {/* Day nav */}
@@ -239,36 +296,46 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
                   </View>
                   {/* Hour grid */}
                   <View style={styles.hourGrid}>
-                    {AVAILABLE_HOURS.map(h => {
-                      const isOccupied = occupied.has(h);
-                      const isSelected = selectedDate === dateStr && selectedHour === h;
+                    {availabilityLoading && appointment.serviceId ? (
+                      <View style={styles.availabilityState}>
+                        <ActivityIndicator size="small" color={colors.gold} />
+                        <Text style={styles.availabilityStateText}>Cargando disponibilidad...</Text>
+                      </View>
+                    ) : null}
+                    {availabilityError ? (
+                      <View style={styles.availabilityState}>
+                        <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                        <Text style={[styles.availabilityStateText, styles.availabilityStateError]}>{availabilityError}</Text>
+                      </View>
+                    ) : null}
+                    {!availabilityLoading && !availabilityError && slotTimes.length === 0 ? (
+                      <View style={styles.availabilityState}>
+                        <Ionicons name="calendar-outline" size={16} color={colors.gray500} />
+                        <Text style={styles.availabilityStateText}>Sin horarios disponibles para este día</Text>
+                      </View>
+                    ) : null}
+                    {slotTimes.map(time => {
+                      const isSelected = selectedDate === dateStr && selectedTime === time;
                       return (
                         <TouchableOpacity
-                          key={h}
+                          key={time}
                           style={[
                             styles.hourCell,
-                            isOccupied && styles.hourCellOccupied,
                             isSelected && styles.hourCellSelected,
                           ]}
                           onPress={() => {
-                            if (!isOccupied) { setSelectedDate(dateStr); setSelectedHour(h); }
+                            setSelectedDate(dateStr);
+                            setSelectedTime(time);
                           }}
-                          disabled={isOccupied}
                           activeOpacity={0.7}
                         >
                           <Text style={[
                             styles.hourCellTime,
-                            isOccupied && styles.hourCellTimeOccupied,
                             isSelected && styles.hourCellTimeSelected,
                           ]}>
-                            {formatHour(h)}
+                            {formatTimeLabel(time)}
                           </Text>
-                          {isOccupied ? (
-                            <View style={styles.occupiedBadge}>
-                              <Ionicons name="lock-closed" size={10} color={colors.gray500} />
-                              <Text style={styles.occupiedText}>Ocupado</Text>
-                            </View>
-                          ) : isSelected ? (
+                          {isSelected ? (
                             <Ionicons name="checkmark-circle" size={18} color={colors.info} />
                           ) : (
                             <Text style={styles.availableText}>Disponible</Text>
@@ -303,8 +370,10 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
                       {days.map((day, di) => {
                         const dateStr = fmt(day);
                         const isToday = sameDay(day, new Date());
-                        const occupied = getOccupiedSlots(dateStr);
                         const occ = getDayOccupation(dateStr);
+                        const backendSlots = availableSlots[dateStr] ?? [];
+                        const fallbackSlots = [9, 10, 11, 13, 14, 15, 16, 17].map(h => `${String(h).padStart(2, '0')}:00`);
+                        const slotTimes = appointment.serviceId ? backendSlots : fallbackSlots;
                         return (
                           <View key={di} style={styles.weekCol}>
                             {/* Day header */}
@@ -320,29 +389,31 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
                               ]} />
                             </View>
                             {/* Time slots */}
-                            {[9, 10, 11, 13, 14, 15, 16, 17].map(h => {
-                              const isOcc = occupied.has(h);
-                              const isSel = selectedDate === dateStr && selectedHour === h;
+                            {slotTimes.length === 0 ? (
+                              <View style={styles.weekSlotEmpty}>
+                                <Text style={styles.weekSlotEmptyText}>Sin horarios</Text>
+                              </View>
+                            ) : null}
+                            {slotTimes.map(time => {
+                              const isSel = selectedDate === dateStr && selectedTime === time;
                               return (
                                 <TouchableOpacity
-                                  key={h}
+                                  key={time}
                                   style={[
                                     styles.weekSlot,
-                                    isOcc && styles.weekSlotOccupied,
                                     isSel && styles.weekSlotSelected,
                                   ]}
                                   onPress={() => {
-                                    if (!isOcc) { setSelectedDate(dateStr); setSelectedHour(h); }
+                                    setSelectedDate(dateStr);
+                                    setSelectedTime(time);
                                   }}
-                                  disabled={isOcc}
                                   activeOpacity={0.7}
                                 >
                                   <Text style={[
                                     styles.weekSlotText,
-                                    isOcc && styles.weekSlotTextOcc,
                                     isSel && styles.weekSlotTextSel,
                                   ]}>
-                                    {h > 12 ? h - 12 : h}{h >= 12 ? 'p' : 'a'}
+                                    {formatTimeCompact(time)}
                                   </Text>
                                 </TouchableOpacity>
                               );
@@ -402,6 +473,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
                               onPress={() => {
                                 if (!isPast) {
                                   setSelectedDate(dateStr);
+                                  setSelectedTime(null);
                                   setCalView('day');
                                   setViewDate(day);
                                 }
@@ -440,13 +512,13 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
             })()}
 
             {/* Selection summary */}
-            {selectedDate && selectedHour !== null && (
+            {selectedDate && selectedTime && (
               <View style={styles.selectionCard}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.info} />
                 <View style={styles.selectionInfo}>
                   <Text style={styles.selectionTitle}>Nuevo horario seleccionado</Text>
                   <Text style={styles.selectionValue}>
-                    {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })} · {formatHour(selectedHour)}
+                    {new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })} · {formatTimeLabel(selectedTime)}
                   </Text>
                 </View>
               </View>
@@ -673,6 +745,26 @@ const styles = StyleSheet.create({
   hourGrid: {
     gap: spacing.xs,
   },
+  availabilityState: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    backgroundColor: colors.gray900,
+  },
+  availabilityStateText: {
+    ...typography.caption,
+    flex: 1,
+    color: colors.gray500,
+    fontSize: 12,
+  },
+  availabilityStateError: {
+    color: colors.error,
+  },
   hourCell: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -684,11 +776,6 @@ const styles = StyleSheet.create({
     borderColor: colors.gray800,
     backgroundColor: colors.gray900,
   },
-  hourCellOccupied: {
-    backgroundColor: colors.gray800,
-    borderColor: colors.gray700,
-    opacity: 0.6,
-  },
   hourCellSelected: {
     borderColor: colors.info,
     backgroundColor: `${colors.info}10`,
@@ -699,22 +786,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.gray400,
   },
-  hourCellTimeOccupied: {
-    color: colors.gray400,
-    textDecorationLine: 'line-through',
-  },
   hourCellTimeSelected: {
     color: colors.info,
     fontWeight: '700',
-  },
-  occupiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  occupiedText: {
-    fontSize: 10,
-    color: colors.gray500,
   },
   availableText: {
     fontSize: 11,
@@ -775,9 +849,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.gray900,
   },
-  weekSlotOccupied: {
-    backgroundColor: colors.gray800,
-    borderColor: colors.gray700,
+  weekSlotEmpty: {
+    width: 52,
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxs,
+  },
+  weekSlotEmptyText: {
+    fontSize: 9,
+    lineHeight: 11,
+    textAlign: 'center',
+    color: colors.gray600,
   },
   weekSlotSelected: {
     backgroundColor: colors.info,
@@ -787,10 +870,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '500',
     color: colors.gray400,
-  },
-  weekSlotTextOcc: {
-    color: colors.gray400,
-    textDecorationLine: 'line-through',
   },
   weekSlotTextSel: {
     color: colors.white,

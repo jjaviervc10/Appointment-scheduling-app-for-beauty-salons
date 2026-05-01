@@ -55,6 +55,8 @@ function mapStatusToMessage(status: number): string {
       return 'Recurso no encontrado.';
     case 409:
       return 'Conflicto de horario o estado.';
+    case 413:
+      return 'La solicitud es demasiado grande.';
     case 422:
       return 'Transicion invalida para la cita.';
     case 429:

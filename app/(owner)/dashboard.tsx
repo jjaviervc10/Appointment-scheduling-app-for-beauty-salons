@@ -353,8 +353,8 @@ export default function DashboardScreen() {
       // 3. Success feedback
       const clientName = rescheduled?.clientName ?? 'Cliente';
       const isScenarioA = !!result.newStartAt;
-      const newTimeLabel = result.requestedStartAt
-        ? new Date(result.requestedStartAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+      const newTimeLabel = result.newStartAt
+        ? new Date(result.newStartAt).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
         : null;
       const newDateLabel = result.newDate
         ? new Date(result.newDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })

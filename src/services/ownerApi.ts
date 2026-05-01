@@ -6,6 +6,26 @@ import type {
   OwnerAppointmentRow,
 } from '../types/api';
 
+export async function getOwnerAppointments(params: {
+  startDate: string;
+  endDate: string;
+  status?: string;
+}): Promise<OwnerAppointmentRow[]> {
+  const query = new URLSearchParams({
+    startDate: params.startDate,
+    endDate: params.endDate,
+  });
+
+  if (params.status) {
+    query.set('status', params.status);
+  }
+
+  const response = await apiRequest<OwnerListResponse>(`/api/owner/appointments?${query.toString()}`, {
+    requiresOwnerAuth: true,
+  });
+  return response.data;
+}
+
 export async function getOwnerPendingAppointments(): Promise<OwnerAppointmentRow[]> {
   const response = await apiRequest<OwnerListResponse>('/api/owner/appointments/pending', {
     requiresOwnerAuth: true,
