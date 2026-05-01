@@ -7,18 +7,36 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
+  ActivityIndicator,
   useWindowDimensions,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import type { AppointmentViewModel } from '../../types/models';
 import { MOCK_APPOINTMENTS } from '../../services/mock-data';
+import { formatLocalDateKey } from '../../utils/date';
+import { rescheduleOwnerAppointment } from '../../services/ownerApi';
+
+/** Result returned to the dashboard after a successful POST /reschedule */
+export interface RescheduleSimulationResult {
+  appointmentId: string;
+  /** awaiting_client_confirmation when newStartAt was sent (Scenario A); reschedule_required otherwise */
+  newStatus: 'awaiting_client_confirmation' | 'reschedule_required';
+  /** ISO 8601 with -06:00 offset — visible slot chosen (no buffers). null for Scenario B */
+  newStartAt: string | null;
+  /** YYYY-MM-DD of new slot. null for Scenario B */
+  newDate: string | null;
+  /** From API response — requested_start_at including buffer_before */
+  requestedStartAt: string;
+  /** From API response — requested_end_at including buffer_after */
+  requestedEndAt: string;
+}
 
 interface Props {
   visible: boolean;
   appointment: AppointmentViewModel | null;
   onClose: () => void;
+  onSimulationComplete?: (result: RescheduleSimulationResult) => void;
 }
 
 const AVAILABLE_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
@@ -28,7 +46,7 @@ const MONTH_NAMES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Jul
 
 type CalView = 'day' | 'week' | 'month';
 
-function fmt(d: Date): string { return d.toISOString().split('T')[0]; }
+function fmt(d: Date): string { return formatLocalDateKey(d); }
 function addDays(d: Date, n: number): Date { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 function getMonday(d: Date): Date {
   const date = new Date(d); const day = date.getDay();
@@ -72,7 +90,7 @@ function getDayOccupation(date: string): number {
   return Math.min(100, Math.round((total / (10 * 60)) * 100));
 }
 
-export function RescheduleModal({ visible, appointment, onClose }: Props) {
+export function RescheduleModal({ visible, appointment, onClose, onSimulationComplete }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -82,21 +100,39 @@ export function RescheduleModal({ visible, appointment, onClose }: Props) {
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const weekStart = useMemo(() => getMonday(viewDate), [viewDate]);
 
-  const handleReschedule = () => {
-    const dayLabel = selectedDate
-      ? new Date(selectedDate + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })
-      : '';
-    const timeLabel = selectedHour !== null ? formatHour(selectedHour) : '';
-
-    Alert.alert(
-      '⇄ Cita reprogramada (simulación)',
-      `Cliente: ${appointment?.clientName}\nServicio: ${appointment?.serviceName}\nHorario original: ${originalDate} · ${originalTime}\nNuevo horario: ${dayLabel}, ${timeLabel}\nMotivo: ${reason || 'No especificado'}\n${notifyClient ? '📱 Cliente notificado' : '🔇 Sin notificación'}`,
-      [{ text: 'OK', onPress: onClose }],
-    );
-    resetForm();
+  const handleReschedule = async () => {
+    if (!appointment || !selectedDate || selectedHour === null) return;
+    setIsSubmitting(true);
+    setSubmitError(null);
+    // Build ISO 8601 with Mexico City standard offset (-06:00). Backend applies slot buffers.
+    const newStartAt = `${selectedDate}T${String(selectedHour).padStart(2, '0')}:00:00-06:00`;
+    try {
+      const result = await rescheduleOwnerAppointment(appointment.id, {
+        newStartAt,
+        reason: reason.trim() || undefined,
+        notifyClient,
+      });
+      onSimulationComplete?.({
+        appointmentId: appointment.id,
+        newStatus: result.status as 'awaiting_client_confirmation' | 'reschedule_required',
+        newStartAt,
+        newDate: selectedDate,
+        requestedStartAt: result.requested_start_at,
+        requestedEndAt: result.requested_end_at,
+      });
+      resetForm();
+      onClose();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al reprogramar. Intenta nuevamente.';
+      setSubmitError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -106,6 +142,8 @@ export function RescheduleModal({ visible, appointment, onClose }: Props) {
     setSelectedHour(null);
     setReason('');
     setNotifyClient(true);
+    setIsSubmitting(false);
+    setSubmitError(null);
   };
 
   const handleClose = () => {
@@ -113,7 +151,7 @@ export function RescheduleModal({ visible, appointment, onClose }: Props) {
     onClose();
   };
 
-  const canConfirm = !!selectedDate && selectedHour !== null;
+  const canConfirm = !!selectedDate && selectedHour !== null && !isSubmitting;
 
   if (!appointment) return null;
 
@@ -451,9 +489,17 @@ export function RescheduleModal({ visible, appointment, onClose }: Props) {
             </TouchableOpacity>
           </ScrollView>
 
+          {/* Submit error — shown above footer when API call fails */}
+          {submitError ? (
+            <View style={styles.submitError}>
+              <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+              <Text style={styles.submitErrorText}>{submitError}</Text>
+            </View>
+          ) : null}
+
           {/* Footer */}
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.btnCancel} onPress={handleClose}>
+            <TouchableOpacity style={styles.btnCancel} onPress={handleClose} disabled={isSubmitting}>
               <Text style={styles.btnCancelText}>Cancelar</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -462,8 +508,11 @@ export function RescheduleModal({ visible, appointment, onClose }: Props) {
               disabled={!canConfirm}
               activeOpacity={0.8}
             >
-              <Ionicons name="calendar-outline" size={18} color={colors.white} />
-              <Text style={styles.btnConfirmText}>Reprogramar</Text>
+              {isSubmitting
+                ? <ActivityIndicator size="small" color={colors.white} />
+                : <Ionicons name="calendar-outline" size={18} color={colors.white} />
+              }
+              <Text style={styles.btnConfirmText}>{isSubmitting ? 'Reprogramando...' : 'Reprogramar'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -961,5 +1010,21 @@ const styles = StyleSheet.create({
   btnConfirmText: {
     ...typography.buttonSmall,
     color: colors.white,
+  },
+  submitError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    backgroundColor: (colors.error as string) + '14',
+    borderTopWidth: 1,
+    borderTopColor: (colors.error as string) + '40',
+  },
+  submitErrorText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.error,
+    lineHeight: 16,
   },
 });

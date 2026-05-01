@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
+import { formatLocalDateKey } from '../../utils/date';
 
 interface Props {
   selectedDate: string;
@@ -18,7 +19,7 @@ function getWeekDates(referenceDate: string): { date: string; dayLabel: string; 
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     return {
-      date: d.toISOString().split('T')[0],
+      date: formatLocalDateKey(d),
       dayLabel: labels[i],
       dayNum: d.getDate(),
     };
@@ -26,7 +27,7 @@ function getWeekDates(referenceDate: string): { date: string; dayLabel: string; 
 }
 
 export function WeeklyCalendarStrip({ selectedDate, onSelectDate }: Props) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = formatLocalDateKey(new Date());
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
 
   return (

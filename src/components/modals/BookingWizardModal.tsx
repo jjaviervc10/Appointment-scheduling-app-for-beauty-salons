@@ -22,6 +22,13 @@ interface Props {
   selectedSlot: TimeSlot | null;
   onClose: () => void;
   onConfirm: () => void;
+  onSubmit: (input: BookingSubmitInput) => Promise<void>;
+}
+
+export interface BookingSubmitInput {
+  serviceId: string;
+  startAt: string;
+  notes?: string;
 }
 
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -30,7 +37,7 @@ const DAYS_ES = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 type AppointmentType = 'individual' | 'familiar';
 type FamilyWho = 'papa_hijos' | 'solo_hijos';
 
-export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClose, onConfirm }: Props) {
+export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClose, onConfirm, onSubmit }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -39,6 +46,8 @@ export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClos
   const [appointmentType, setAppointmentType] = useState<AppointmentType>('individual');
   const [familyWho, setFamilyWho] = useState<FamilyWho>('papa_hijos');
   const [childCount, setChildCount] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Reset on open/close
   useEffect(() => {
@@ -48,6 +57,8 @@ export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClos
       setAppointmentType('individual');
       setFamilyWho('papa_hijos');
       setChildCount(1);
+      setIsSubmitting(false);
+      setSubmitError(null);
     }
   }, [visible]);
 
@@ -61,12 +72,35 @@ export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClos
   const monthName = MONTHS_ES[dateObj.getMonth()];
   const monthCap = monthName.charAt(0).toUpperCase() + monthName.slice(1);
 
-  const handleConfirm = () => {
-    Alert.alert(
-      'Solicitud enviada',
-      'Tu cita queda pendiente hasta que Jaquelina la apruebe.',
-      [{ text: 'OK', onPress: () => { onConfirm(); } }],
-    );
+  const handleConfirm = async () => {
+    if (!selectedService || !selectedSlot) return;
+
+    const notes =
+      appointmentType === 'familiar'
+        ? `[Tipo: familiar] ${familyWho === 'papa_hijos' ? 'Papa + hijos' : 'Solo hijos'} (${childCount} hijo${childCount > 1 ? 's' : ''})`
+        : undefined;
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      await onSubmit({
+        serviceId: selectedService.id,
+        startAt: new Date(`${selectedDate}T${selectedSlot.startTime}:00`).toISOString(),
+        notes,
+      });
+
+      Alert.alert(
+        'Solicitud enviada',
+        'Tu cita queda pendiente hasta que Jaquelina la apruebe.',
+        [{ text: 'OK', onPress: () => { onConfirm(); } }],
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo enviar la solicitud.';
+      setSubmitError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!selectedSlot) return null;
@@ -279,8 +313,16 @@ export function BookingWizardModal({ visible, selectedDate, selectedSlot, onClos
                   <Ionicons name="arrow-back" size={16} color={colors.gray600} />
                   <Text style={styles.backBtnText}>Cambiar servicio</Text>
                 </TouchableOpacity>
-                <PrimaryButton label="Solicitar cita" onPress={handleConfirm} style={styles.confirmBtn} />
+                <PrimaryButton
+                  label="Solicitar cita"
+                  onPress={() => void handleConfirm()}
+                  style={styles.confirmBtn}
+                  loading={isSubmitting}
+                  disabled={isSubmitting}
+                />
               </View>
+
+              {submitError ? <Text style={styles.submitError}>{submitError}</Text> : null}
 
               <Text style={styles.disclaimer}>La cita queda pendiente hasta que Jaquelina la apruebe.</Text>
             </View>
@@ -445,6 +487,7 @@ const styles = StyleSheet.create({
   },
   backBtnText: { ...typography.bodySmall, color: colors.gray400, fontWeight: '600' },
   confirmBtn: {},
+  submitError: { ...typography.caption, color: colors.error, marginTop: spacing.sm },
 
   disclaimer: { ...typography.caption, color: colors.gray500, textAlign: 'center', marginTop: spacing.xs },
 });

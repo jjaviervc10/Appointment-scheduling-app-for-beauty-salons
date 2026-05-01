@@ -1,0 +1,123 @@
+import type { AppointmentStatus } from './enums';
+
+export type ApiErrorDetails = Record<string, string[]>;
+
+export interface ApiErrorBody {
+  ok?: false;
+  error?: string;
+  details?: ApiErrorDetails;
+}
+
+export interface ApiSuccessEnvelope<T> {
+  ok: true;
+  data?: T;
+  appointment?: OwnerAppointmentMutationResult;
+}
+
+export interface OwnerAppointmentRow {
+  id: string;
+  status: AppointmentStatus;
+  requested_start_at: string;
+  requested_end_at: string;
+  notes: string | null;
+  cancellation_reason: string | null;
+  created_at?: string;
+  clients?: {
+    id: string;
+    full_name: string;
+    phone: string;
+  } | null;
+  services?: {
+    id: string;
+    name: string;
+    duration_minutes: number;
+  } | null;
+}
+
+export interface OwnerListResponse {
+  ok: true;
+  data: OwnerAppointmentRow[];
+}
+
+export interface OwnerAppointmentMutationResult {
+  id: string;
+  status: AppointmentStatus;
+  requested_start_at: string;
+  requested_end_at: string;
+}
+
+export interface OwnerMutationResponse {
+  ok: true;
+  appointment: OwnerAppointmentMutationResult;
+}
+
+export interface PublicBookingRequestInput {
+  fullName: string;
+  phone: string;
+  serviceId: string;
+  startAt: string;
+  notes?: string;
+  token?: string;
+}
+
+export interface PublicBookingResponse {
+  ok: true;
+  appointment: {
+    id: string;
+    status: AppointmentStatus;
+    requestedStartAt: string;
+    requestedEndAt: string;
+  };
+  client: {
+    fullName: string;
+    phone: string;
+  };
+}
+
+export interface PublicService {
+  id: string;
+  name: string;
+  durationMinutes?: number;
+  price?: number | null;
+}
+
+export interface PublicAvailabilitySlot {
+  slotStartAt: string;
+  slotEndAt: string;
+}
+
+export interface PublicServicesResponse {
+  ok: true;
+  data: Array<{
+    id: string;
+    name: string;
+    duration_minutes?: number;
+    price?: number | null;
+  }>;
+}
+
+export interface PublicAvailabilityResponse {
+  ok: true;
+  data: Array<{
+    slot_start_at?: string;
+    slot_end_at?: string;
+    slotStartAt?: string;
+    slotEndAt?: string;
+  }>;
+}
+
+export class HttpError extends Error {
+  readonly status: number;
+  readonly details?: ApiErrorDetails;
+
+  constructor(status: number, message: string, details?: ApiErrorDetails) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+    this.details = details;
+  }
+}
+
+export function isHttpError(error: unknown): error is HttpError {
+  return error instanceof HttpError;
+}

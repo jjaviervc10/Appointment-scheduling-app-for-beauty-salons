@@ -1,30 +1,19 @@
-/**
- * Incidents service layer.
- * TODO: Replace mock calls with real Supabase queries.
- */
-
-import { MOCK_INCIDENTS } from './mock-data';
 import type { Incident } from '../types/database';
 
 export async function fetchIncidents(): Promise<Incident[]> {
-  // TODO: Supabase query from booking.incidents
-  return MOCK_INCIDENTS;
+  throw new Error('No backend endpoint connected for incidents.');
 }
 
 export async function fetchActiveIncidents(): Promise<Incident[]> {
-  // TODO: .eq('is_resolved', false)
-  return MOCK_INCIDENTS.filter((i) => !i.is_resolved);
+  throw new Error('No backend endpoint connected for active incidents.');
 }
 
 export async function createIncident(
   incident: Omit<Incident, 'id' | 'created_at' | 'resolved_at'>
 ): Promise<{ id: string }> {
-  // TODO: Supabase insert into booking.incidents
-  console.log('[MOCK] Creating incident', incident);
-  return { id: 'inc-' + Date.now() };
+  throw new Error(`No backend endpoint connected for creating incidents: ${incident.title}`);
 }
 
 export async function resolveIncident(incidentId: string): Promise<void> {
-  // TODO: Supabase update set is_resolved = true, resolved_at = now()
-  console.log('[MOCK] Resolving incident', incidentId);
+  throw new Error(`No backend endpoint connected for resolving incidents: ${incidentId}`);
 }

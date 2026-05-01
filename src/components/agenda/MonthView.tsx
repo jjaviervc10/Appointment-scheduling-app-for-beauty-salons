@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import { statusColors } from '../../theme';
 import type { AppointmentViewModel } from '../../types/models';
+import { formatLocalDateKey } from '../../utils/date';
 
 interface MonthViewProps {
   date: Date;
@@ -16,7 +17,7 @@ const DAYS_HEADER = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const MONTHS_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
+  return formatLocalDateKey(d);
 }
 
 function getCalendarDays(year: number, month: number): (Date | null)[] {

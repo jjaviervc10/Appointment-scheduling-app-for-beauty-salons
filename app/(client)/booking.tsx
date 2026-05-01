@@ -14,8 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../src/theme';
 import { MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS } from '../../src/services/mock-data';
-import { BookingWizardModal } from '../../src/components/modals/BookingWizardModal';
+import { BookingWizardModal, type BookingSubmitInput } from '../../src/components/modals/BookingWizardModal';
 import type { TimeSlot } from '../../src/types/models';
+import { createPublicBookingRequest } from '../../src/services/bookingApi';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -26,6 +27,8 @@ const fmt = (d: Date) => d.toISOString().split('T')[0];
 const WORK_START = 9;
 const WORK_END = 18;
 const SLOT_DURATION = 45;
+const MAIN_APP_CLIENT_FULL_NAME = '[APP] Cliente principal';
+const MAIN_APP_CLIENT_PHONE = '+526140000000';
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 type ViewMode = 'mes' | 'semana' | 'dia';
@@ -151,6 +154,17 @@ export default function BookingScreen() {
     setSelectedSlot(slot);
     setShowWizard(true);
   };
+
+  const handleBookingSubmit = useCallback(async (input: BookingSubmitInput) => {
+    await createPublicBookingRequest({
+      fullName: MAIN_APP_CLIENT_FULL_NAME,
+      phone: MAIN_APP_CLIENT_PHONE,
+      serviceId: input.serviceId,
+      startAt: input.startAt,
+      notes: input.notes,
+      token: undefined,
+    });
+  }, []);
 
   const capMonth = (m: number) => MONTHS_ES[m].charAt(0).toUpperCase() + MONTHS_ES[m].slice(1);
 
@@ -472,6 +486,7 @@ export default function BookingScreen() {
         selectedSlot={selectedSlot}
         onClose={() => setShowWizard(false)}
         onConfirm={() => { setShowWizard(false); setSelectedSlot(null); }}
+        onSubmit={handleBookingSubmit}
       />
     </SafeAreaView>
   );

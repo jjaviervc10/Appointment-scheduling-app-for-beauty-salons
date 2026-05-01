@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   ViewStyle,
+  StyleProp,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,7 +13,7 @@ import { colors, spacing, typography, radii } from '../../theme';
 interface Props {
   label: string;
   onPress: () => void;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   disabled?: boolean;
   loading?: boolean;
   icon?: keyof typeof Ionicons.glyphMap;

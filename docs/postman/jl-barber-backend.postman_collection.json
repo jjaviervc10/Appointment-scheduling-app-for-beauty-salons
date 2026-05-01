@@ -1,0 +1,665 @@
+{
+  "info": {
+    "name": "JL Barber Backend",
+    "description": "Colección de pruebas para jl-barber-backend. Configura la variable `serviceId` con un UUID válido de `booking.services` antes de ejecutar las pruebas de booking.",
+    "_postman_id": "jl-barber-backend-v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "URL base de la API. Cambiar a la URL de Railway en producción."
+    },
+    {
+      "key": "serviceId",
+      "value": "",
+      "type": "string",
+      "description": "UUID de un servicio activo en booking.services. Obtenerlo desde Supabase Dashboard → Table Editor → booking.services."
+    },
+    {
+      "key": "startAt",
+      "value": "",
+      "type": "string",
+      "description": "Calculado automáticamente por el pre-request script (próximo slot de 15 min, +1 hora)."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Verifica que el servidor está vivo. Debe retornar 200 con ok:true y timestamp."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok is true', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.timestamp).to.be.a('string');",
+                  "  pm.expect(json.service).to.equal('jl-barber-backend');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"ok\": true,\n  \"service\": \"jl-barber-backend\",\n  \"timestamp\": \"2026-05-01T16:00:00.000Z\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Public Booking",
+      "item": [
+        {
+          "name": "POST /api/public-booking/request — válido",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Calcula el próximo slot de 15 min, al menos 1 hora en el futuro",
+                  "const slotMs = 15 * 60 * 1000;",
+                  "const now = Date.now();",
+                  "const startMs = Math.ceil((now + 60 * 60 * 1000) / slotMs) * slotMs;",
+                  "pm.collectionVariables.set('startAt', new Date(startMs).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 o 409 (slot ocupado es válido)', () => {",
+                  "  pm.expect([200, 409]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('ok presente en respuesta', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json).to.have.property('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"[TEST] Usuario Prueba\",\n  \"phone\": \"+526149999999\",\n  \"serviceId\": \"{{serviceId}}\",\n  \"startAt\": \"{{startAt}}\",\n  \"notes\": \"Prueba desde Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Solicitud válida. Requiere que `serviceId` esté configurado con un UUID de servicio activo.\n\n⚠️ ADVERTENCIA: Crea registros reales en Supabase. Eliminar manualmente después de la prueba desde booking.appointments y booking.clients."
+          },
+          "response": [
+            {
+              "name": "200 Cita creada",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"ok\": true,\n  \"appointment\": {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"status\": \"pending_owner_approval\",\n    \"requestedStartAt\": \"2026-05-05T17:00:00.000Z\",\n    \"requestedEndAt\": \"2026-05-05T17:40:00.000Z\"\n  },\n  \"client\": {\n    \"fullName\": \"[TEST] Usuario Prueba\",\n    \"phone\": \"+526149999999\"\n  }\n}"
+            },
+            {
+              "name": "409 Slot no disponible",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"ok\": false,\n  \"error\": \"El horario solicitado no está disponible\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "POST — teléfono inválido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"abc123\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000001\",\n  \"startAt\": \"2026-05-10T16:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 400 — teléfono no cumple el formato E.164."
+          }
+        },
+        {
+          "name": "POST — startAt sin timezone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000001\",\n  \"startAt\": \"2026-05-10T16:00:00\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 400 — startAt sin offset de timezone (Zod requiere datetime con offset)."
+          }
+        },
+        {
+          "name": "POST — startAt minuto inválido (:07)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000001\",\n  \"startAt\": \"2026-05-10T16:07:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 400 — los minutos deben ser múltiplo de 15 (00, 15, 30, 45)."
+          }
+        },
+        {
+          "name": "POST — serviceId inválido (no UUID)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"not-a-uuid\",\n  \"startAt\": \"2026-05-10T16:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 400 — serviceId no es un UUID válido."
+          }
+        },
+        {
+          "name": "POST — serviceId UUID inexistente (404)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const slotMs = 15 * 60 * 1000;",
+                  "const now = Date.now();",
+                  "const startMs = Math.ceil((now + 60 * 60 * 1000) / slotMs) * slotMs;",
+                  "pm.collectionVariables.set('startAt', new Date(startMs).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000099\",\n  \"startAt\": \"{{startAt}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 404 — UUID válido pero servicio no existe en la base de datos."
+          }
+        },
+        {
+          "name": "POST — payload > 20kb (413)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Genera un campo notes de ~21kb",
+                  "pm.collectionVariables.set('bigNotes', 'x'.repeat(21 * 1024));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 413', () => pm.response.to.have.status(413));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Test\",\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000001\",\n  \"startAt\": \"2026-05-10T16:00:00.000Z\",\n  \"notes\": \"{{bigNotes}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 413 — body supera el límite de 20kb configurado en express.json."
+          }
+        },
+        {
+          "name": "POST — fullName faltante (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+526141234567\",\n  \"serviceId\": \"00000000-0000-0000-0000-000000000001\",\n  \"startAt\": \"2026-05-10T16:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/public-booking/request",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "public-booking", "request"]
+            },
+            "description": "Espera 400 — campo fullName es requerido."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Owner",
+      "description": "Endpoints del panel de la dueña. Requieren Authorization: Bearer {{ownerToken}}.",
+      "item": [
+        {
+          "name": "GET /api/owner/appointments/pending",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "pending"]
+            },
+            "description": "Lista citas en estado pending_owner_approval. Debe incluir las citas creadas desde Public Booking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true y data array', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/owner/appointments/today",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/today",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "today"]
+            },
+            "description": "Lista citas del día actual según la lógica del backend."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true y data array', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/owner/clients",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/clients?search={{clientSearch}}&page={{page}}&limit={{limit}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "clients"],
+              "query": [
+                { "key": "search", "value": "{{clientSearch}}" },
+                { "key": "page", "value": "{{page}}" },
+                { "key": "limit", "value": "{{limit}}" }
+              ]
+            },
+            "description": "Lista clientes con búsqueda y paginación."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true, data array y total numérico', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "  pm.expect(json.total).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/owner/services",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/services?active={{serviceActive}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "services"],
+              "query": [
+                { "key": "active", "value": "{{serviceActive}}" }
+              ]
+            },
+            "description": "Lista servicios; usa serviceActive=true/false en el environment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true y data array', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/owner/messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "messages"]
+            },
+            "description": "Lista notification_events pendientes."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true y data array', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/owner/appointments/:id/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/{{pendingAppointmentId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "{{pendingAppointmentId}}", "approve"]
+            },
+            "description": "Aprueba una cita pendiente. Usa pendingAppointmentId de una cita [TEST], no de clientes reales."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ok true y appointment presente', () => {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.ok).to.be.true;",
+                  "  pm.expect(json.appointment).to.be.an('object');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/owner/appointments/:id/reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"{{rejectReason}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/{{pendingAppointmentId}}/reject",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "{{pendingAppointmentId}}", "reject"]
+            },
+            "description": "Rechaza una cita pendiente. Usa solo citas [TEST]."
+          }
+        },
+        {
+          "name": "POST /api/owner/appointments/:id/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"{{cancelReason}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/{{appointmentId}}/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "{{appointmentId}}", "cancel"]
+            },
+            "description": "Cancela una cita pendiente o confirmada. Usa solo citas [TEST]."
+          }
+        },
+        {
+          "name": "POST /api/owner/appointments/:id/complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{ownerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/{{appointmentId}}/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "{{appointmentId}}", "complete"]
+            },
+            "description": "Completa una cita confirmada. Si la cita es futura, se espera 422."
+          }
+        },
+        {
+          "name": "GET /api/owner/appointments/pending — sin token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/owner/appointments/pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "owner", "appointments", "pending"]
+            },
+            "description": "Caso negativo: debe devolver 401 sin Authorization."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('ok false', () => pm.expect(pm.response.json().ok).to.be.false);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

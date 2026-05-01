@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import { statusColors, statusLabels } from '../../theme';
@@ -10,16 +10,27 @@ interface TodayTimelineProps {
   appointments: AppointmentViewModel[];
   blocks: TimeBlock[];
   onAppointmentPress: (id: string) => void;
+  isCollapsed?: boolean;
+  isExpanded?: boolean;
+  onToggle: () => void;
 }
 
 const START_HOUR = 8;
 const END_HOUR = 20;
 
-export function TodayTimeline({ appointments, blocks, onAppointmentPress }: TodayTimelineProps) {
+export function TodayTimeline({
+  appointments,
+  blocks,
+  onAppointmentPress,
+  isCollapsed = false,
+  isExpanded = false,
+  onToggle,
+}: TodayTimelineProps) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const HOUR_HEIGHT = isMobile ? 48 : 60;
   const LEFT_GUTTER = isMobile ? 42 : 56;
+  const totalTimelineHeight = (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT;
 
   const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
 
@@ -44,72 +55,86 @@ export function TodayTimeline({ appointments, blocks, onAppointmentPress }: Toda
   };
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.header, isMobile && styles.headerMobile]}>
+    <View style={[styles.container, isCollapsed && styles.containerCollapsed]}>
+      <TouchableOpacity style={[styles.header, isMobile && styles.headerMobile]} onPress={onToggle} activeOpacity={0.7}>
         <Text style={[styles.title, isMobile && styles.titleMobile]}>Timeline del día</Text>
-      </View>
-      <View style={[styles.timeline, { paddingLeft: LEFT_GUTTER }]}>
-        {/* Hour labels + grid lines */}
-        {hours.map((hour) => (
-          <View key={hour} style={[styles.hourRow, { top: (hour - START_HOUR) * HOUR_HEIGHT }]}>
-            <Text style={[styles.hourLabel, { width: LEFT_GUTTER - 8 }]}>
-              {String(hour).padStart(2, '0')}:00
-            </Text>
-            <View style={styles.hourLine} />
-          </View>
-        ))}
-
-        {/* Time blocks (lunch, etc.) */}
-        {blocks.map((block) => {
-          const top = getTopOffset(block.start_time);
-          const [sh, sm] = block.start_time.split(':').map(Number);
-          const [eh, em] = block.end_time.split(':').map(Number);
-          const duration = (eh * 60 + em) - (sh * 60 + sm);
-          const height = getBlockHeight(duration);
-
-          return (
-            <View
-              key={block.id}
-              style={[styles.blockItem, { top, height, backgroundColor: colors.gray200 + '80', left: LEFT_GUTTER }]}
-            >
-              <Text style={styles.blockLabel}>
-                <Ionicons name="lock-closed" size={10} color={colors.gray500} /> {block.label}
-              </Text>
+        <View style={styles.headerRight}>
+          {appointments.length > 0 && (
+            <View style={styles.apptCountBadge}>
+              <Text style={styles.apptCountText}>{appointments.length}</Text>
             </View>
-          );
-        })}
+          )}
+          <Ionicons
+            name={isExpanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={colors.gold}
+          />
+        </View>
+      </TouchableOpacity>
 
-        {/* Appointments */}
-        {appointments.map((appt) => {
-          const top = getTopOffset(appt.startAt);
-          const height = Math.max(getBlockHeight(appt.durationMinutes), 36);
-          const sc = getStatusColor(appt.status);
-
-          return (
-            <TouchableOpacity
-              key={appt.id}
-              style={[styles.apptBlock, { top, height, backgroundColor: sc.bg, borderLeftColor: sc.text, left: LEFT_GUTTER }]}
-              onPress={() => onAppointmentPress(appt.id)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.apptContent}>
-                <Text style={[styles.apptClient, { color: sc.text }]} numberOfLines={1}>
-                  {appt.clientName}
+      {!isCollapsed && (
+        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={[styles.timeline, { paddingLeft: LEFT_GUTTER, height: totalTimelineHeight + spacing.xl }]}>
+            {/* Hour labels + grid lines */}
+            {hours.map((hour) => (
+              <View key={hour} style={[styles.hourRow, { top: (hour - START_HOUR) * HOUR_HEIGHT }]}>
+                <Text style={[styles.hourLabel, { width: LEFT_GUTTER - 8 }]}>
+                  {String(hour).padStart(2, '0')}:00
                 </Text>
-                <Text style={styles.apptService} numberOfLines={1}>
-                  {appt.serviceName} · {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-                </Text>
+                <View style={styles.hourLine} />
               </View>
-            </TouchableOpacity>
-          );
-        })}
+            ))}
 
-        {/* Current time indicator */}
-        <CurrentTimeIndicator startHour={START_HOUR} hourHeight={HOUR_HEIGHT} leftGutter={LEFT_GUTTER} />
+            {/* Time blocks (lunch, etc.) */}
+            {blocks.map((block) => {
+              const top = getTopOffset(block.start_time);
+              const [sh, sm] = block.start_time.split(':').map(Number);
+              const [eh, em] = block.end_time.split(':').map(Number);
+              const duration = (eh * 60 + em) - (sh * 60 + sm);
+              const height = getBlockHeight(duration);
 
-        {/* Bottom spacer to ensure all hours are visible */}
-        <View style={{ height: (END_HOUR - START_HOUR + 1) * HOUR_HEIGHT }} />
-      </View>
+              return (
+                <View
+                  key={block.id}
+                  style={[styles.blockItem, { top, height, backgroundColor: colors.gray200 + '80', left: LEFT_GUTTER }]}
+                >
+                  <Text style={styles.blockLabel}>
+                    <Ionicons name="lock-closed" size={10} color={colors.gray500} /> {block.label}
+                  </Text>
+                </View>
+              );
+            })}
+
+            {/* Appointments */}
+            {appointments.map((appt) => {
+              const top = getTopOffset(appt.startAt);
+              const height = Math.max(getBlockHeight(appt.durationMinutes), 36);
+              const sc = getStatusColor(appt.status);
+
+              return (
+                <TouchableOpacity
+                  key={appt.id}
+                  style={[styles.apptBlock, { top, height, backgroundColor: sc.bg, borderLeftColor: sc.text, left: LEFT_GUTTER }]}
+                  onPress={() => onAppointmentPress(appt.id)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.apptContent}>
+                    <Text style={[styles.apptClient, { color: sc.text }]} numberOfLines={1}>
+                      {appt.clientName}
+                    </Text>
+                    <Text style={styles.apptService} numberOfLines={1}>
+                      {appt.serviceName} · {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {/* Current time indicator */}
+            <CurrentTimeIndicator startHour={START_HOUR} hourHeight={HOUR_HEIGHT} leftGutter={LEFT_GUTTER} />
+          </View>
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -131,27 +156,59 @@ function CurrentTimeIndicator({ startHour, hourHeight, leftGutter }: { startHour
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    minWidth: 0,
     backgroundColor: colors.gray900,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.gray800,
     overflow: 'hidden',
   },
+  containerCollapsed: {
+    flex: 0,
+  },
   header: {
-    padding: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+    paddingHorizontal: spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: colors.gray800,
   },
   headerMobile: {
     padding: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  apptCountBadge: {
+    backgroundColor: colors.gold + '22',
+    borderWidth: 1,
+    borderColor: colors.gold + '55',
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  apptCountText: {
+    ...typography.caption,
+    color: colors.gold,
+    fontWeight: '700',
+    fontSize: 11,
   },
   title: {
     ...typography.h3,
     color: colors.white,
-    fontSize: 16,
+    fontSize: 15,
   },
   titleMobile: {
-    fontSize: 14,
+    fontSize: 13,
+  },
+  scrollContent: {
+    flex: 1,
   },
   timeline: {
     position: 'relative',

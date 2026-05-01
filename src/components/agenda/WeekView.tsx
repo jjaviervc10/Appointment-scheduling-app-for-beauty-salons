@@ -5,6 +5,7 @@ import { colors, spacing, typography, radii } from '../../theme';
 import { statusColors } from '../../theme';
 import type { AppointmentViewModel } from '../../types/models';
 import type { TimeBlock } from '../../types/database';
+import { formatLocalDateKey } from '../../utils/date';
 
 interface WeekViewProps {
   weekStart: Date;
@@ -32,7 +33,7 @@ function getMonday(d: Date): Date {
 }
 
 function fmt(d: Date): string {
-  return d.toISOString().split('T')[0];
+  return formatLocalDateKey(d);
 }
 
 export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppointmentPress }: WeekViewProps) {
