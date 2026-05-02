@@ -4,6 +4,9 @@ import type {
   OwnerListResponse,
   OwnerMutationResponse,
   OwnerAppointmentRow,
+  OwnerClientDetailResponse,
+  OwnerClientRow,
+  OwnerClientsResponse,
   OwnerWeeklyAvailabilityResponse,
   OwnerWeeklyAvailabilityRow,
   OwnerWeeklyAvailabilityUpdateInput,
@@ -41,6 +44,37 @@ export async function getOwnerTodayAppointments(): Promise<OwnerAppointmentRow[]
     requiresOwnerAuth: true,
   });
   return response.data;
+}
+
+export async function getOwnerClients(params: {
+  search?: string;
+  page?: number;
+  limit?: number;
+} = {}): Promise<{ data: OwnerClientRow[]; total: number }> {
+  const query = new URLSearchParams();
+
+  if (params.search?.trim()) {
+    query.set('search', params.search.trim());
+  }
+  if (params.page) {
+    query.set('page', String(params.page));
+  }
+  if (params.limit) {
+    query.set('limit', String(params.limit));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const response = await apiRequest<OwnerClientsResponse>(`/api/owner/clients${suffix}`, {
+    requiresOwnerAuth: true,
+  });
+
+  return { data: response.data, total: response.total };
+}
+
+export async function getOwnerClientDetail(id: string): Promise<OwnerClientDetailResponse> {
+  return apiRequest<OwnerClientDetailResponse>(`/api/owner/clients/${encodeURIComponent(id)}`, {
+    requiresOwnerAuth: true,
+  });
 }
 
 export async function getOwnerWeeklyAvailability(): Promise<OwnerWeeklyAvailabilityRow[]> {

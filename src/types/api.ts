@@ -39,6 +39,51 @@ export interface OwnerListResponse {
   data: OwnerAppointmentRow[];
 }
 
+export interface OwnerClientRow {
+  id: string;
+  full_name: string;
+  phone: string;
+  created_at: string;
+  last_seen_at: string | null;
+  totalAppointments: number | null;
+  lastAppointmentAt: string | null;
+  lastServiceName: string | null;
+  nextAppointmentAt: string | null;
+}
+
+export interface OwnerClientsResponse {
+  ok: true;
+  data: OwnerClientRow[];
+  total: number;
+}
+
+export interface OwnerClientDetail extends OwnerClientRow {
+  completedAppointments: number | null;
+  cancelledAppointments: number | null;
+  noShowAppointments: number | null;
+}
+
+export interface OwnerClientAppointmentRow {
+  id: string;
+  status: AppointmentStatus;
+  requested_start_at: string;
+  requested_end_at: string;
+  notes: string | null;
+  cancellation_reason: string | null;
+  created_at: string;
+  services?: {
+    id: string;
+    name: string;
+    duration_minutes: number;
+  } | null;
+}
+
+export interface OwnerClientDetailResponse {
+  ok: true;
+  client: OwnerClientDetail;
+  appointments: OwnerClientAppointmentRow[];
+}
+
 export interface OwnerAppointmentMutationResult {
   id: string;
   status: AppointmentStatus;
