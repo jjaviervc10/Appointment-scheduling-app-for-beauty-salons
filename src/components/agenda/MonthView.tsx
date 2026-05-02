@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import { statusColors } from '../../theme';
@@ -191,18 +191,33 @@ export function MonthView({ date, appointments, onMonthChange, onDayPress }: Mon
   );
 }
 
+const INITIAL_VISIBLE = 4;
+
 function DayDetailModal({ day, appointments, onClose, onOpenDay }: {
   day: Date; appointments: AppointmentViewModel[]; onClose: () => void; onOpenDay: () => void;
 }) {
+  const { height: windowHeight } = useWindowDimensions();
+  const [showAll, setShowAll] = useState(false);
+
+  const confirmed = appointments.filter(a =>
+    a.status === 'client_confirmed' || a.status === 'confirmed_by_owner' || a.status === 'completed'
+  ).length;
+  const pending = appointments.filter(a => a.status === 'pending_owner_approval').length;
+
+  const cardMaxHeight = Math.floor(windowHeight * 0.78);
+  const visible = showAll ? appointments : appointments.slice(0, INITIAL_VISIBLE);
+  const hiddenCount = appointments.length - INITIAL_VISIBLE;
+
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
       <TouchableOpacity style={mdStyles.overlay} onPress={onClose} activeOpacity={1}>
-        <View style={mdStyles.card}>
+        <View style={[mdStyles.card, { maxHeight: cardMaxHeight }]}>
+          {/* Header */}
           <View style={mdStyles.header}>
-            <Text style={mdStyles.title}>
+            <Text style={mdStyles.title} numberOfLines={1}>
               {day.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
             </Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="close" size={22} color={colors.gray500} />
             </TouchableOpacity>
           </View>
@@ -213,27 +228,69 @@ function DayDetailModal({ day, appointments, onClose, onOpenDay }: {
               <Text style={mdStyles.emptyText}>Sin citas este día</Text>
             </View>
           ) : (
-            <View style={mdStyles.list}>
-              {appointments.map((appt) => {
-                const sc = statusColors[appt.status as keyof typeof statusColors] || { text: colors.gray600, bg: colors.gray200 };
-                return (
-                  <View key={appt.id} style={[mdStyles.apptRow, { borderLeftColor: sc.text }]}>
-                    <Text style={mdStyles.apptTime}>
-                      {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    <View style={mdStyles.apptInfo}>
-                      <Text style={mdStyles.apptName}>{appt.clientName}</Text>
-                      <Text style={mdStyles.apptService}>{appt.serviceName}</Text>
-                    </View>
-                    <View style={[mdStyles.statusChip, { backgroundColor: sc.bg }]}>
-                      <View style={[mdStyles.statusDot, { backgroundColor: sc.text }]} />
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
+            <>
+              {/* Stats summary */}
+              <View style={mdStyles.stats}>
+                <View style={mdStyles.statItem}>
+                  <Text style={mdStyles.statValue}>{appointments.length}</Text>
+                  <Text style={mdStyles.statLabel}>Total</Text>
+                </View>
+                <View style={mdStyles.statDivider} />
+                <View style={mdStyles.statItem}>
+                  <Text style={[mdStyles.statValue, { color: colors.statusConfirmed }]}>{confirmed}</Text>
+                  <Text style={mdStyles.statLabel}>Confirmadas</Text>
+                </View>
+                <View style={mdStyles.statDivider} />
+                <View style={mdStyles.statItem}>
+                  <Text style={[mdStyles.statValue, { color: colors.gold }]}>{pending}</Text>
+                  <Text style={mdStyles.statLabel}>Pendientes</Text>
+                </View>
+              </View>
+
+              {/* Scrollable list */}
+              <ScrollView
+                style={mdStyles.listScroll}
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+              >
+                <View style={mdStyles.list}>
+                  {visible.map((appt) => {
+                    const sc = statusColors[appt.status as keyof typeof statusColors] || { text: colors.gray600, bg: colors.gray200 };
+                    return (
+                      <View key={appt.id} style={[mdStyles.apptRow, { borderLeftColor: sc.text }]}>
+                        <Text style={mdStyles.apptTime}>
+                          {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                        <View style={mdStyles.apptInfo}>
+                          <Text style={mdStyles.apptName}>{appt.clientName}</Text>
+                          <Text style={mdStyles.apptService}>{appt.serviceName}</Text>
+                        </View>
+                        <View style={[mdStyles.statusChip, { backgroundColor: sc.bg }]}>
+                          <View style={[mdStyles.statusDot, { backgroundColor: sc.text }]} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+
+              {/* Show more / less */}
+              {appointments.length > INITIAL_VISIBLE && (
+                <TouchableOpacity
+                  style={mdStyles.showMoreBtn}
+                  onPress={() => setShowAll(v => !v)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={mdStyles.showMoreText}>
+                    {showAll ? 'Ver menos' : `Ver ${hiddenCount} cita${hiddenCount !== 1 ? 's' : ''} más`}
+                  </Text>
+                  <Ionicons name={showAll ? 'chevron-up' : 'chevron-down'} size={14} color={colors.gray400} />
+                </TouchableOpacity>
+              )}
+            </>
           )}
 
+          {/* Footer */}
           <TouchableOpacity style={mdStyles.openBtn} onPress={onOpenDay} activeOpacity={0.7}>
             <Text style={mdStyles.openBtnText}>Abrir vista del día</Text>
             <Ionicons name="arrow-forward" size={16} color={colors.gold} />
@@ -246,12 +303,18 @@ function DayDetailModal({ day, appointments, onClose, onOpenDay }: {
 
 const mdStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
-  card: { backgroundColor: colors.gray900, borderRadius: radii.lg, padding: spacing.xxl, width: 400, maxHeight: '80%', borderWidth: 1, borderColor: colors.gray800 },
+  card: { backgroundColor: colors.gray900, borderRadius: radii.lg, padding: spacing.xxl, width: 400, borderWidth: 1, borderColor: colors.gray800, flexDirection: 'column' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
   title: { ...typography.h3, color: colors.white, textTransform: 'capitalize' },
   empty: { alignItems: 'center', paddingVertical: spacing.xxxl, gap: spacing.sm },
   emptyText: { ...typography.body, color: colors.gray400 },
+  stats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', backgroundColor: colors.gray800, borderRadius: radii.sm, paddingVertical: spacing.md, marginBottom: spacing.md },
+  statItem: { flex: 1, alignItems: 'center', gap: 2 },
+  statValue: { ...typography.h3, color: colors.white, fontSize: 20, fontWeight: '700' },
+  statLabel: { ...typography.caption, color: colors.gray400, fontSize: 11 },
+  statDivider: { width: 1, height: 32, backgroundColor: colors.gray700 },
   list: { gap: spacing.sm },
+  listScroll: { flex: 1, minHeight: 0 },
   apptRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderLeftWidth: 3, backgroundColor: colors.gray800, borderRadius: radii.sm, gap: spacing.md },
   apptTime: { ...typography.caption, color: colors.gray500, width: 40 },
   apptInfo: { flex: 1, gap: spacing.xxs },
@@ -259,7 +322,9 @@ const mdStyles = StyleSheet.create({
   apptService: { ...typography.caption, color: colors.gray400 },
   statusChip: { width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-  openBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.xl, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.gray800 },
+  showMoreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, paddingVertical: spacing.sm, marginTop: spacing.xs },
+  showMoreText: { ...typography.caption, color: colors.gray400, fontSize: 12 },
+  openBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.md, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.gray800 },
   openBtnText: { ...typography.subtitle, color: colors.gold, fontSize: 14 },
 });
 

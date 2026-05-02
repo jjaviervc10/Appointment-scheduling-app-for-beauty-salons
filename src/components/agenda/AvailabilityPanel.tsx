@@ -7,8 +7,8 @@ import type { DayOfWeek } from '../../types/enums';
 import { fetchWeeklyAvailability, updateWeeklyAvailability } from '../../services/availability';
 import { isHttpError } from '../../types/api';
 
-const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const DISPLAY_DAYS: DayOfWeek[] = [1, 2, 3, 4, 5, 6, 0];
 const ALLOWED_MINUTES = new Set(['00', '15', '30', '45']);
 

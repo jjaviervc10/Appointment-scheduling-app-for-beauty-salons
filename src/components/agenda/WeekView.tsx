@@ -57,7 +57,14 @@ export function WeekView({ weekStart, appointments, blocks, onWeekChange, onAppo
   const formatRange = () => {
     const endDay = new Date(monday);
     endDay.setDate(monday.getDate() + 6);
-    return `${monday.getDate()} - ${endDay.getDate()} de ${monday.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`;
+    const sameMonth = monday.getMonth() === endDay.getMonth() && monday.getFullYear() === endDay.getFullYear();
+    if (sameMonth) {
+      return `${monday.getDate()} – ${endDay.getDate()} de ${monday.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}`;
+    }
+    const startFmt = monday.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+    const endFmt = endDay.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+    const year = endDay.getFullYear();
+    return `${startFmt} – ${endFmt} de ${year}`;
   };
 
   const getTop = (time: Date | string) => {
