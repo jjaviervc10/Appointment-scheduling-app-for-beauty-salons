@@ -1,6 +1,7 @@
 import type { TimeSlot, DaySummary } from '../types/models';
 import type { WeeklyAvailability, TimeBlock } from '../types/database';
-import { getOwnerWeeklyAvailability } from './ownerApi';
+import { getOwnerWeeklyAvailability, updateOwnerWeeklyAvailability } from './ownerApi';
+import type { DayOfWeek } from '../types/enums';
 
 function normalizeClockTime(value: string): string {
   const [hour = '00', minute = '00'] = value.split(':');
@@ -38,12 +39,22 @@ export async function fetchWeeklyAvailability(): Promise<WeeklyAvailability[]> {
 }
 
 export async function updateWeeklyAvailability(
-  dayOfWeek: number,
-  startTime: string,
-  endTime: string,
-  isActive: boolean
-): Promise<void> {
-  throw new Error(
-    `No backend endpoint connected for updating weekly availability: ${dayOfWeek} ${startTime}-${endTime} active=${isActive}`
-  );
+  availability: Array<{
+    dayOfWeek: DayOfWeek;
+    startTime: string;
+    endTime: string;
+    isActive: boolean;
+  }>
+): Promise<WeeklyAvailability[]> {
+  const rows = await updateOwnerWeeklyAvailability({ availability });
+
+  return rows.map((row) => ({
+    id: row.id,
+    owner_id: '',
+    day_of_week: row.dayOfWeek,
+    start_time: normalizeClockTime(row.startTime),
+    end_time: normalizeClockTime(row.endTime),
+    is_active: row.isActive,
+    created_at: '',
+  }));
 }

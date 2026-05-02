@@ -64,6 +64,15 @@ export interface OwnerWeeklyAvailabilityResponse {
   availability: OwnerWeeklyAvailabilityRow[];
 }
 
+export interface OwnerWeeklyAvailabilityUpdateInput {
+  availability: Array<{
+    dayOfWeek: DayOfWeek;
+    startTime: string;
+    endTime: string;
+    isActive: boolean;
+  }>;
+}
+
 export interface PublicBookingRequestInput {
   fullName: string;
   phone: string;
