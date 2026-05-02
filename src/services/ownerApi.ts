@@ -11,6 +11,11 @@ import type {
   OwnerWeeklyAvailabilityRow,
   OwnerWeeklyAvailabilityUpdateInput,
 } from '../types/api';
+import type {
+  OwnerMessagesParams,
+  OwnerMessagesResponse,
+  RetryOwnerMessageResponse,
+} from '../types/messages';
 
 export async function getOwnerAppointments(params: {
   startDate: string;
@@ -75,6 +80,41 @@ export async function getOwnerClientDetail(id: string): Promise<OwnerClientDetai
   return apiRequest<OwnerClientDetailResponse>(`/api/owner/clients/${encodeURIComponent(id)}`, {
     requiresOwnerAuth: true,
   });
+}
+
+export async function getOwnerMessages(params: OwnerMessagesParams = {}): Promise<OwnerMessagesResponse> {
+  const query = new URLSearchParams();
+
+  if (params.status) {
+    query.set('status', params.status);
+  }
+  if (params.messageType) {
+    query.set('messageType', params.messageType);
+  }
+  if (params.page) {
+    query.set('page', String(params.page));
+  }
+  if (params.limit) {
+    query.set('limit', String(params.limit));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiRequest<OwnerMessagesResponse>(`/api/owner/messages${suffix}`, {
+    requiresOwnerAuth: true,
+  });
+}
+
+export async function retryOwnerMessage(id: string): Promise<RetryOwnerMessageResponse['message']> {
+  const response = await apiRequest<RetryOwnerMessageResponse>(
+    `/api/owner/messages/${encodeURIComponent(id)}/retry`,
+    {
+      method: 'POST',
+      body: {},
+      requiresOwnerAuth: true,
+    },
+  );
+
+  return response.message;
 }
 
 export async function getOwnerWeeklyAvailability(): Promise<OwnerWeeklyAvailabilityRow[]> {
