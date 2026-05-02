@@ -1,4 +1,4 @@
-import type { AppointmentStatus } from './enums';
+import type { AppointmentStatus, DayOfWeek } from './enums';
 
 export type ApiErrorDetails = Record<string, string[]>;
 
@@ -49,6 +49,19 @@ export interface OwnerAppointmentMutationResult {
 export interface OwnerMutationResponse {
   ok: true;
   appointment: OwnerAppointmentMutationResult;
+}
+
+export interface OwnerWeeklyAvailabilityRow {
+  id: string;
+  dayOfWeek: DayOfWeek;
+  startTime: string;
+  endTime: string;
+  isActive: boolean;
+}
+
+export interface OwnerWeeklyAvailabilityResponse {
+  ok: true;
+  availability: OwnerWeeklyAvailabilityRow[];
 }
 
 export interface PublicBookingRequestInput {

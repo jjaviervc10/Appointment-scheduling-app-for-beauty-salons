@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
 import type { WeeklyAvailability } from '../../types/database';
-import { fetchWeeklyAvailability, updateWeeklyAvailability } from '../../services/availability';
+import { fetchWeeklyAvailability } from '../../services/availability';
+import { isHttpError } from '../../types/api';
 
 const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -19,14 +20,6 @@ function to12h(time24: string): { hour: string; minute: string; period: Period }
   return { hour: String(h), minute: mStr || '00', period };
 }
 
-function to24h(hour: string, minute: string, period: Period): string {
-  let h = parseInt(hour, 10);
-  if (isNaN(h) || h < 1 || h > 12) h = 12;
-  if (period === 'AM' && h === 12) h = 0;
-  else if (period === 'PM' && h !== 12) h += 12;
-  return `${String(h).padStart(2, '0')}:${minute || '00'}`;
-}
-
 function format12Display(time24: string): string {
   const { hour, minute, period } = to12h(time24);
   return `${hour}:${minute} ${period}`;
@@ -35,62 +28,52 @@ function format12Display(time24: string): string {
 export function AvailabilityPanel() {
   const [availability, setAvailability] = useState<WeeklyAvailability[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editingDay, setEditingDay] = useState<number | null>(null);
   const { width } = useWindowDimensions();
   const isMobile = width < 600;
 
-  useEffect(() => {
-    fetchWeeklyAvailability().then((data) => {
+  const loadAvailability = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const data = await fetchWeeklyAvailability();
       setAvailability(data);
+    } catch (loadError) {
+      if (isHttpError(loadError) && loadError.status === 401) {
+        setError('No autorizado. Verifica el token owner configurado para Netlify.');
+      } else if (loadError instanceof Error) {
+        setError(loadError.message);
+      } else {
+        setError('No se pudo cargar la disponibilidad.');
+      }
+      setAvailability([]);
+    } finally {
       setLoading(false);
-    });
+    }
   }, []);
+
+  useEffect(() => {
+    void loadAvailability();
+  }, [loadAvailability]);
 
   const toggleDay = useCallback((dayOfWeek: number) => {
     const existing = availability.find(a => a.day_of_week === dayOfWeek);
     if (existing) {
-      updateWeeklyAvailability(dayOfWeek, existing.start_time, existing.end_time, !existing.is_active);
-      setAvailability(prev =>
-        prev.map(a => a.day_of_week === dayOfWeek ? { ...a, is_active: !a.is_active } : a)
-      );
+      setNotice('La edición de disponibilidad aún no está habilitada por backend. Esta vista muestra la configuración actual.');
     }
   }, [availability]);
-
-  const updateTime = useCallback((dayOfWeek: number, field: 'start_time' | 'end_time', value: string) => {
-    setAvailability(prev =>
-      prev.map(a => a.day_of_week === dayOfWeek ? { ...a, [field]: value } : a)
-    );
-  }, []);
-
-  const updateTimePart = useCallback((
-    dayOfWeek: number,
-    field: 'start_time' | 'end_time',
-    part: 'hour' | 'minute' | 'period',
-    value: string,
-    currentTime: string,
-  ) => {
-    const parsed = to12h(currentTime);
-    if (part === 'hour') parsed.hour = value;
-    else if (part === 'minute') parsed.minute = value;
-    else if (part === 'period') parsed.period = value as Period;
-    const new24 = to24h(parsed.hour, parsed.minute, parsed.period);
-    updateTime(dayOfWeek, field, new24);
-  }, [updateTime]);
 
   const copyToAll = useCallback((sourceDow: number) => {
     const source = availability.find(a => a.day_of_week === sourceDow);
     if (!source) return;
-    setAvailability(prev =>
-      prev.map(a => ({
-        ...a,
-        start_time: source.start_time,
-        end_time: source.end_time,
-        is_active: source.is_active,
-      }))
-    );
+    setNotice('Copiar horarios requiere un endpoint de guardado. Por ahora la disponibilidad está en modo lectura.');
   }, [availability]);
 
-  const renderTimeInput = (dow: number, field: 'start_time' | 'end_time', time24: string, label: string) => {
+  const renderTimeInput = (time24: string, label: string) => {
     const { hour, minute, period } = to12h(time24);
     return (
       <View style={styles.timeField}>
@@ -99,15 +82,9 @@ export function AvailabilityPanel() {
           {/* Hour input */}
           <View style={styles.inputGroup}>
             <TextInput
-              style={styles.timeInput}
+              style={[styles.timeInput, styles.timeInputReadonly]}
               value={hour}
-              onChangeText={(val) => {
-                const cleaned = val.replace(/[^0-9]/g, '').slice(0, 2);
-                updateTimePart(dow, field, 'hour', cleaned, time24);
-              }}
-              keyboardType="number-pad"
-              maxLength={2}
-              selectTextOnFocus
+              editable={false}
               placeholder="12"
               placeholderTextColor={colors.gray300}
             />
@@ -118,15 +95,9 @@ export function AvailabilityPanel() {
           {/* Minute input */}
           <View style={styles.inputGroup}>
             <TextInput
-              style={styles.timeInput}
+              style={[styles.timeInput, styles.timeInputReadonly]}
               value={minute}
-              onChangeText={(val) => {
-                const cleaned = val.replace(/[^0-9]/g, '').slice(0, 2);
-                updateTimePart(dow, field, 'minute', cleaned, time24);
-              }}
-              keyboardType="number-pad"
-              maxLength={2}
-              selectTextOnFocus
+              editable={false}
               placeholder="00"
               placeholderTextColor={colors.gray300}
             />
@@ -136,14 +107,14 @@ export function AvailabilityPanel() {
           <View style={styles.periodToggle}>
             <TouchableOpacity
               style={[styles.periodBtn, period === 'AM' && styles.periodBtnActive]}
-              onPress={() => updateTimePart(dow, field, 'period', 'AM', time24)}
+              disabled
               activeOpacity={0.7}
             >
               <Text style={[styles.periodText, period === 'AM' && styles.periodTextActive]}>AM</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.periodBtn, period === 'PM' && styles.periodBtnActive]}
-              onPress={() => updateTimePart(dow, field, 'period', 'PM', time24)}
+              disabled
               activeOpacity={0.7}
             >
               <Text style={[styles.periodText, period === 'PM' && styles.periodTextActive]}>PM</Text>
@@ -157,7 +128,24 @@ export function AvailabilityPanel() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
+        <ActivityIndicator size="small" color={colors.gold} />
         <Text style={styles.loadingText}>Cargando disponibilidad...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <View style={styles.errorIcon}>
+          <Ionicons name="alert-circle-outline" size={24} color={colors.error} />
+        </View>
+        <Text style={styles.errorTitle}>No se pudo cargar la disponibilidad</Text>
+        <Text style={styles.errorMessage}>{error}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => void loadAvailability()} activeOpacity={0.7}>
+          <Ionicons name="refresh" size={16} color={colors.black} />
+          <Text style={styles.retryBtnText}>Reintentar</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -175,7 +163,29 @@ export function AvailabilityPanel() {
         contentContainerStyle={[styles.scrollContent, isMobile && styles.scrollContentMobile]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.readOnlyBanner}>
+          <Ionicons name="information-circle-outline" size={18} color={colors.gold} />
+          <Text style={styles.readOnlyText}>
+            Vista de solo lectura. El backend actual permite consultar disponibilidad, pero aún no expone un endpoint de guardado.
+          </Text>
+        </View>
+
+        {notice ? (
+          <TouchableOpacity style={styles.noticeBanner} onPress={() => setNotice(null)} activeOpacity={0.8}>
+            <Text style={styles.noticeText}>{notice}</Text>
+            <Ionicons name="close" size={16} color={colors.gray400} />
+          </TouchableOpacity>
+        ) : null}
+
+        {availability.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="calendar-outline" size={28} color={colors.gray600} />
+            <Text style={styles.emptyText}>No hay disponibilidad configurada.</Text>
+          </View>
+        ) : null}
+
         {/* Quick view - visual week */}
+        {availability.length > 0 ? (
         <ScrollView horizontal={isMobile} showsHorizontalScrollIndicator={false}>
           <View style={[styles.weekPreview, isMobile && styles.weekPreviewMobile]}>
             {[1, 2, 3, 4, 5, 6, 0].map((dow) => {
@@ -205,8 +215,10 @@ export function AvailabilityPanel() {
             })}
           </View>
         </ScrollView>
+        ) : null}
 
         {/* Day-by-day config */}
+        {availability.length > 0 ? (
         <View style={styles.daysList}>
           {[1, 2, 3, 4, 5, 6, 0].map((dow) => {
             const day = availability.find(a => a.day_of_week === dow);
@@ -251,11 +263,11 @@ export function AvailabilityPanel() {
                 {isExpanded && isActive && day && (
                   <View style={[styles.dayExpanded, isMobile && styles.dayExpandedMobile]}>
                     <View style={[styles.timeRow, isMobile && styles.timeRowMobile]}>
-                      {renderTimeInput(dow, 'start_time', day.start_time, 'Desde')}
+                      {renderTimeInput(day.start_time, 'Desde')}
                       <View style={styles.timeDivider}>
                         <Ionicons name="arrow-forward" size={16} color={colors.gray300} />
                       </View>
-                      {renderTimeInput(dow, 'end_time', day.end_time, 'Hasta')}
+                      {renderTimeInput(day.end_time, 'Hasta')}
                     </View>
                     <TouchableOpacity
                       style={styles.copyBtn}
@@ -271,11 +283,16 @@ export function AvailabilityPanel() {
             );
           })}
         </View>
+        ) : null}
 
         {/* Save button */}
-        <TouchableOpacity style={[styles.saveBtn, isMobile && styles.saveBtnMobile]} activeOpacity={0.7}>
-          <Ionicons name="checkmark-circle-outline" size={20} color={colors.black} />
-          <Text style={styles.saveBtnText}>Guardar disponibilidad</Text>
+        <TouchableOpacity
+          style={[styles.saveBtn, styles.saveBtnDisabled, isMobile && styles.saveBtnMobile]}
+          activeOpacity={0.7}
+          onPress={() => setNotice('Guardar disponibilidad estará disponible cuando exista el endpoint de actualización en backend.')}
+        >
+          <Ionicons name="lock-closed-outline" size={20} color={colors.gray500} />
+          <Text style={[styles.saveBtnText, styles.saveBtnTextDisabled]}>Guardar disponibilidad</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -284,8 +301,48 @@ export function AvailabilityPanel() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
   loadingText: { ...typography.body, color: colors.gray400 },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.xl,
+  },
+  errorIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.error + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorTitle: {
+    ...typography.subtitle,
+    color: colors.white,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    ...typography.bodySmall,
+    color: colors.gray400,
+    textAlign: 'center',
+    maxWidth: 420,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gold,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    marginTop: spacing.sm,
+  },
+  retryBtnText: {
+    ...typography.buttonSmall,
+    color: colors.black,
+  },
   header: {
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
     backgroundColor: colors.black, borderBottomWidth: 1, borderBottomColor: colors.gray800,
@@ -295,6 +352,53 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   scrollContent: { padding: spacing.xl },
   scrollContentMobile: { padding: spacing.md },
+  readOnlyBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.gold + '12',
+    borderWidth: 1,
+    borderColor: colors.gold + '35',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  readOnlyText: {
+    ...typography.bodySmall,
+    flex: 1,
+    color: colors.gray300,
+  },
+  noticeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.info + '14',
+    borderWidth: 1,
+    borderColor: colors.info + '35',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  noticeText: {
+    ...typography.bodySmall,
+    flex: 1,
+    color: colors.gray300,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 220,
+    backgroundColor: colors.gray900,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    borderRadius: radii.md,
+    marginBottom: spacing.lg,
+  },
+  emptyText: {
+    ...typography.bodySmall,
+    color: colors.gray500,
+  },
 
   /* Week preview */
   weekPreview: {
@@ -366,6 +470,10 @@ const styles = StyleSheet.create({
     textAlign: 'center', fontSize: 18, fontWeight: '600',
     color: colors.white, backgroundColor: colors.gray800,
   },
+  timeInputReadonly: {
+    color: colors.gray300,
+    opacity: 0.9,
+  },
   timeSeparator: {
     fontSize: 20, fontWeight: '700', color: colors.gray400, marginHorizontal: 2,
   },
@@ -399,6 +507,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: spacing.sm,
     marginTop: spacing.xl, marginBottom: spacing.huge,
   },
+  saveBtnDisabled: {
+    backgroundColor: colors.gray800,
+    borderWidth: 1,
+    borderColor: colors.gray700,
+  },
   saveBtnMobile: { paddingVertical: spacing.md, marginTop: spacing.lg },
   saveBtnText: { ...typography.button, color: colors.black },
+  saveBtnTextDisabled: { color: colors.gray500 },
 });

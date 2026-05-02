@@ -4,6 +4,8 @@ import type {
   OwnerListResponse,
   OwnerMutationResponse,
   OwnerAppointmentRow,
+  OwnerWeeklyAvailabilityResponse,
+  OwnerWeeklyAvailabilityRow,
 } from '../types/api';
 
 export async function getOwnerAppointments(params: {
@@ -38,6 +40,13 @@ export async function getOwnerTodayAppointments(): Promise<OwnerAppointmentRow[]
     requiresOwnerAuth: true,
   });
   return response.data;
+}
+
+export async function getOwnerWeeklyAvailability(): Promise<OwnerWeeklyAvailabilityRow[]> {
+  const response = await apiRequest<OwnerWeeklyAvailabilityResponse>('/api/owner/weekly-availability', {
+    requiresOwnerAuth: true,
+  });
+  return response.availability;
 }
 
 export async function approveOwnerAppointment(id: string): Promise<OwnerAppointmentMutationResult> {
