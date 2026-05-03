@@ -1,6 +1,6 @@
 import type { TimeSlot, DaySummary } from '../types/models';
 import type { WeeklyAvailability, TimeBlock } from '../types/database';
-import { getOwnerTimeBlocks, getOwnerWeeklyAvailability, updateOwnerWeeklyAvailability, deleteWeekOverride } from './ownerApi';
+import { getOwnerTimeBlocks, createOwnerTimeBlock, deleteOwnerTimeBlock, getOwnerWeeklyAvailability, updateOwnerWeeklyAvailability, deleteWeekOverride } from './ownerApi';
 export { deleteWeekOverride };
 import type { DayOfWeek } from '../types/enums';
 import { formatLocalDateKey } from '../utils/date';
@@ -78,7 +78,20 @@ export async function fetchTimeBlocks(startDate: string, endDate = startDate): P
 }
 
 export async function createTimeBlock(block: Omit<TimeBlock, 'id' | 'created_at'>): Promise<{ id: string }> {
-  throw new Error(`El contrato HTTP actual solo permite listar bloqueos. Falta POST /api/owner/time-blocks para persistir el bloqueo del ${block.date}.`);
+  const row = await createOwnerTimeBlock({
+    blockType: block.block_type,
+    reason: block.notes ?? block.label ?? null,
+    isRecurring: block.is_recurring,
+    specificDate: !block.is_recurring ? block.date : null,
+    dayOfWeek: block.is_recurring ? (block.recurrence_day_of_week ?? null) : null,
+    startTime: block.start_time,
+    endTime: block.end_time,
+  });
+  return { id: row.id };
+}
+
+export async function deleteTimeBlock(id: string): Promise<void> {
+  await deleteOwnerTimeBlock(id);
 }
 
 export async function fetchWeeklyAvailability(

@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 import type { Incident, TimeBlock } from '../../types/database';
 import { MOCK_INCIDENTS } from '../../services/mock-data';
-import { fetchTimeBlocks } from '../../services/availability';
+import { fetchTimeBlocks, deleteTimeBlock } from '../../services/availability';
 import { formatLocalDateKey } from '../../utils/date';
 import { BlockTimeModal } from '../modals/BlockTimeModal';
 
@@ -36,6 +36,7 @@ export function BlocksPanel() {
   const [showNewBlock, setShowNewBlock] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadBlocks = useCallback(async () => {
     setLoading(true);
@@ -54,6 +55,21 @@ export function BlocksPanel() {
 
   useEffect(() => {
     void loadBlocks();
+  }, [loadBlocks]);
+
+  const handleDeleteBlock = useCallback(async (compositeId: string) => {
+    const rowId = compositeId.split(':')[0];
+    if (!rowId) return;
+    setDeletingId(compositeId);
+    setError(null);
+    try {
+      await deleteTimeBlock(rowId);
+      await loadBlocks();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'No se pudo eliminar el bloqueo.');
+    } finally {
+      setDeletingId(null);
+    }
   }, [loadBlocks]);
 
   return (
@@ -122,6 +138,7 @@ export function BlocksPanel() {
           ) : (
             blocks.map((block) => {
               const cfg = BLOCK_TYPE_CONFIG[block.block_type] || BLOCK_TYPE_CONFIG.otro;
+              const isDeleting = deletingId === block.id;
               return (
                 <View key={block.id} style={styles.blockCard}>
                   <View style={[styles.blockIcon, { backgroundColor: cfg.color + '15' }]}>
@@ -135,6 +152,17 @@ export function BlocksPanel() {
                     </Text>
                     {block.notes ? <Text style={styles.blockNotes}>{block.notes}</Text> : null}
                   </View>
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => void handleDeleteBlock(block.id)}
+                    disabled={isDeleting}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    {isDeleting
+                      ? <ActivityIndicator size="small" color={colors.error} />
+                      : <Ionicons name="trash-outline" size={18} color={colors.error} />}
+                  </TouchableOpacity>
                 </View>
               );
             })
@@ -239,6 +267,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.gray800,
+  },
+  deleteBtn: {
+    padding: spacing.xs,
+    borderRadius: radii.sm,
   },
   blockIcon: { width: 36, height: 36, borderRadius: radii.sm, justifyContent: 'center', alignItems: 'center' },
   blockInfo: { flex: 1, gap: spacing.xxs },

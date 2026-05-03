@@ -72,6 +72,7 @@ export function BlockTimeModal({ visible, onClose }: Props) {
   const [label, setLabel] = useState('Personal');
   const [notes, setNotes] = useState('');
   const [recurring, setRecurring] = useState(false);
+  const [dateText, setDateText] = useState(() => formatLocalDateKey(new Date()));
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const blockType = useMemo(
@@ -94,6 +95,7 @@ export function BlockTimeModal({ visible, onClose }: Props) {
     setLabel('Personal');
     setNotes('');
     setRecurring(false);
+    setDateText(formatLocalDateKey(new Date()));
     setSubmitError(null);
   };
 
@@ -109,13 +111,18 @@ export function BlockTimeModal({ visible, onClose }: Props) {
       return;
     }
 
+    const resolvedDate = recurring ? formatLocalDateKey(new Date()) : dateText.trim();
+    if (!recurring && !/^\d{4}-\d{2}-\d{2}$/.test(resolvedDate)) {
+      setSubmitError('Ingresa una fecha valida en formato AAAA-MM-DD.');
+      return;
+    }
+
     setSubmitError(null);
-    const today = formatLocalDateKey(new Date());
     const block: Omit<TimeBlock, 'id' | 'created_at'> = {
       owner_id: '',
       block_type: blockType.key as TimeBlock['block_type'],
       label: label.trim() || blockType.label,
-      date: today,
+      date: resolvedDate,
       start_time: startTime,
       end_time: endTime,
       is_recurring: recurring,
@@ -130,7 +137,12 @@ export function BlockTimeModal({ visible, onClose }: Props) {
       resetForm();
       onClose();
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : 'No se pudo guardar el bloqueo en backend.');
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.includes('409') || msg.toLowerCase().includes('conflict') || msg.toLowerCase().includes('overlap')) {
+        setSubmitError('Conflicto: existe una cita activa en ese horario. Elige otro rango o cancela primero la cita.');
+      } else {
+        setSubmitError(msg || 'No se pudo guardar el bloqueo. Intenta de nuevo.');
+      }
     }
   };
 
@@ -151,13 +163,6 @@ export function BlockTimeModal({ visible, onClose }: Props) {
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            <View style={styles.contractNotice}>
-              <Ionicons name="information-circle-outline" size={16} color={colors.info} />
-              <Text style={styles.contractNoticeText}>
-                El backend actual lista bloqueos reales, pero aun no expone POST /api/owner/time-blocks para crearlos.
-              </Text>
-            </View>
-
             <Text style={styles.sectionTitle}>Tipo de bloqueo</Text>
             <View style={styles.typeGrid}>
               {BLOCK_TYPES.map((type) => {
@@ -232,6 +237,20 @@ export function BlockTimeModal({ visible, onClose }: Props) {
               numberOfLines={3}
             />
 
+            {!recurring ? (
+              <>
+                <Text style={styles.fieldLabel}>Fecha (AAAA-MM-DD)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="2026-06-04"
+                  placeholderTextColor={colors.gray400}
+                  value={dateText}
+                  onChangeText={(v) => { setDateText(v); setSubmitError(null); }}
+                  maxLength={10}
+                />
+              </>
+            ) : null}
+
             <TouchableOpacity
               style={[styles.recurringToggle, recurring && styles.recurringToggleActive]}
               onPress={() => setRecurring(!recurring)}
@@ -247,7 +266,7 @@ export function BlockTimeModal({ visible, onClose }: Props) {
                   Repetir cada semana
                 </Text>
                 <Text style={styles.recurringSub}>
-                  {recurring ? 'Se bloqueara todos los mismos dias' : 'Solo se bloqueara hoy'}
+                  {recurring ? 'Se bloqueara cada semana en este dia' : `Solo para el ${dateText || 'dia seleccionado'}`}
                 </Text>
               </View>
               <View style={[styles.toggleTrack, recurring && styles.toggleTrackActive]}>
@@ -393,17 +412,6 @@ const styles = StyleSheet.create({
   headerTitle: { ...typography.h3, color: colors.white },
   body: { flex: 1 },
   bodyContent: { padding: spacing.xl, gap: spacing.md },
-  contractNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.info + '35',
-    backgroundColor: colors.info + '12',
-  },
-  contractNoticeText: { ...typography.bodySmall, flex: 1, color: colors.gray300 },
   sectionTitle: { ...typography.subtitle, color: colors.white, marginBottom: spacing.xs },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   typeCard: {

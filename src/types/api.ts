@@ -114,6 +114,26 @@ export interface OwnerTimeBlocksResponse {
   data: OwnerTimeBlockRow[];
 }
 
+export interface OwnerTimeBlockCreateInput {
+  blockType: string;
+  reason?: string | null;
+  isRecurring: boolean;
+  specificDate?: string | null;
+  dayOfWeek?: number | null;
+  startTime: string;
+  endTime: string;
+}
+
+export interface OwnerTimeBlockCreateResponse {
+  ok: true;
+  timeBlock: OwnerTimeBlockRow;
+}
+
+export interface OwnerTimeBlockDeleteResponse {
+  ok: true;
+  timeBlock: { id: string; is_active: false };
+}
+
 export interface OwnerAppointmentMutationResult {
   id: string;
   status: AppointmentStatus;

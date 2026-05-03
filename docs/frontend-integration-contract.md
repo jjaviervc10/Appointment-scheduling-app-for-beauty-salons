@@ -1,7 +1,8 @@
 # Frontend Integration Contract — Jaquelina López Barber Studio
 
-Define exactamente qué debe llamar el frontend (React Native + Expo) para cada acción del sistema.  
-Todas las llamadas usan el **Supabase JavaScript SDK** (`@supabase/supabase-js`).
+Define exactamente qué debe llamar el frontend (React Native + Expo) para cada acción del sistema.
+
+> **Arquitectura dual**: las acciones del **cliente** usan el Supabase JavaScript SDK directamente (RLS garantiza acceso). Las acciones del **owner** usan un API REST Express desplegado en Railway, con autenticación por `Bearer` token. Ver sección [Owner REST API](#owner-rest-api).
 
 ---
 
@@ -29,6 +30,30 @@ export const supabase = createClient(
 | `client` | Cualquier cliente del estudio | Email/Password o token de mini app |
 
 RLS garantiza que cada usuario solo vea y modifique lo que le corresponde.
+
+---
+
+## Arquitectura de API
+
+| Capa | Tecnología | Autenticación | Uso |
+|---|---|---|---|
+| **Supabase SDK** | `@supabase/supabase-js` | Supabase Auth session | Todas las rutas de cliente (slots, citas, cancelación, confirmación) |
+| **Owner REST API** | Express en Railway | `Authorization: Bearer <OWNER_SECRET>` | Todas las rutas del owner (agenda, bloqueos, disponibilidad, mensajes, clientes) |
+
+**Base URL Owner REST API:**
+```
+Productión: https://striking-caring-production.up.railway.app
+Local:      http://localhost:3000
+```
+Configurado vía `EXPO_PUBLIC_API_BASE_URL`. Secreto vía `EXPO_PUBLIC_OWNER_SECRET`.
+
+Todos los endpoints owner devuelven `{ ok: true, ... }` en éxito y `{ ok: false, error: string }` en error.
+
+**Header requerido en todas las llamadas owner:**
+```
+Authorization: Bearer <OWNER_SECRET>
+Content-Type: application/json
+```
 
 ---
 
@@ -613,5 +638,220 @@ if (error) {
 
 ---
 
-_Última revisión: 2026-04-26_  
-_Próxima actualización: cuando se implemente Fase 2 (integración real frontend-Supabase)_
+_Última revisión: 2026-05-03_  
+_Próxima actualización: cuando se integre incidencias reales desde backend_
+
+---
+
+## Owner REST API
+
+> Todas las rutas bajo `/api/owner/*` requieren `Authorization: Bearer <OWNER_SECRET>`.
+
+---
+
+### A. Obtener bloqueos de horario
+
+| Campo | Valor |
+|---|---|
+| **Método** | `GET` |
+| **Ruta** | `/api/owner/time-blocks` |
+| **Auth** | Bearer |
+
+**Query params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `startDate` | `YYYY-MM-DD` | ✅ | Fecha inicio del rango |
+| `endDate` | `YYYY-MM-DD` | ✅ | Fecha fin del rango |
+
+**Respuesta:**
+```typescript
+{
+  ok: true,
+  data: Array<{
+    id: string;              // uuid
+    block_type: string;      // 'personal' | 'comida' | 'descanso' | 'mandado' | 'otro' | ...
+    reason: string | null;
+    is_recurring: boolean;
+    day_of_week: number | null;    // 0=domingo … 6=sábado (solo si is_recurring=true)
+    specific_date: string | null;  // 'YYYY-MM-DD' (solo si is_recurring=false)
+    start_time: string;    // 'HH:MM:SS'
+    end_time: string;      // 'HH:MM:SS'
+  }>
+}
+```
+
+**Notas de implementación frontend:**
+- `specific_date` → se expande a una instancia por fecha en el rango.
+- `is_recurring + day_of_week` → se expande a una instancia por cada fecha del rango que coincida con el día de la semana.
+- El ID que muestra la UI es compuesto `uuid:dateKey` para distinguir instancias de un mismo bloqueo recurrente. Para DELETE se extrae solo el UUID.
+
+---
+
+### B. Crear bloqueo de horario
+
+| Campo | Valor |
+|---|---|
+| **Método** | `POST` |
+| **Ruta** | `/api/owner/time-blocks` |
+| **Auth** | Bearer |
+
+**Body:**
+```typescript
+{
+  blockType: string;           // 'personal' | 'comida' | 'descanso' | 'mandado' | 'otro' | 'escuela' | 'otro'
+  reason?: string | null;      // texto libre, se muestra como etiqueta
+  isRecurring: boolean;
+  specificDate?: string | null; // 'YYYY-MM-DD' — requerido si isRecurring=false
+  dayOfWeek?: number | null;    // 0-6 — requerido si isRecurring=true
+  startTime: string;           // 'HH:MM'
+  endTime: string;             // 'HH:MM'
+}
+```
+
+**Respuesta exitosa (201):**
+```typescript
+{
+  ok: true,
+  timeBlock: {
+    id: string;
+    block_type: string;
+    reason: string | null;
+    is_recurring: boolean;
+    day_of_week: number | null;
+    specific_date: string | null;
+    start_time: string;
+    end_time: string;
+  }
+}
+```
+
+**Errores:**
+
+| HTTP | Causa | Mensaje al usuario |
+|---|---|---|
+| 400 | Campos inválidos o faltantes | "Datos del bloqueo inválidos" |
+| 401 | Token incorrecto | — (error de configuración) |
+| 409 | Solapamiento con cita activa o bloqueo existente | "Conflicto: existe una cita activa en ese horario" |
+| 500 | Error interno | "No se pudo guardar el bloqueo. Intenta de nuevo." |
+
+**Regla de conflicto 409:** el backend llama a `booking.is_slot_available()`. Bloquea si hay citas en estados: `pending_owner_approval`, `confirmed_by_owner`, `awaiting_client_confirmation`, `client_confirmed`, `reschedule_required`.
+
+---
+
+### C. Eliminar bloqueo de horario
+
+| Campo | Valor |
+|---|---|
+| **Método** | `DELETE` |
+| **Ruta** | `/api/owner/time-blocks/:id` |
+| **Auth** | Bearer |
+
+**Parámetros:**
+
+| Param | Tipo | Descripción |
+|---|---|---|
+| `:id` | `uuid` | ID del bloqueo a eliminar (soft-delete: `is_active = false`) |
+
+**Respuesta exitosa (200):**
+```typescript
+{ ok: true, timeBlock: { id: string; is_active: false } }
+```
+
+**Errores:**
+
+| HTTP | Causa |
+|---|---|
+| 400 | El `:id` no es un UUID válido |
+| 401 | Token incorrecto |
+| 404 | Bloqueo no encontrado o ya inactivo |
+| 500 | Error interno |
+
+**Nota:** eliminar un bloqueo recurrente afecta todas las futuras ocurrencias (soft-delete del registro raíz). No existe endpoint para eliminar solo una instancia de una recurrencia.
+
+---
+
+### D. Obtener disponibilidad semanal del owner
+
+| Campo | Valor |
+|---|---|
+| **Método** | `GET` |
+| **Ruta** | `/api/owner/weekly-availability` |
+| **Auth** | Bearer |
+
+**Query params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `week_start_date` | `YYYY-MM-DD` | ❌ | Lunes de la semana deseada. Sin este param devuelve la plantilla base. |
+
+**Respuesta:**
+```typescript
+{
+  ok: true,
+  data: Array<{
+    id: string;
+    dayOfWeek: number;     // 0-6
+    startTime: string;     // 'HH:MM'
+    endTime: string;       // 'HH:MM'
+    isActive: boolean;
+    isOverride: boolean;   // true si es override de semana específica
+    overrideId: string | null;
+  }>,
+  hasOverrides: boolean    // true si algún día tiene override activo para la semana
+}
+```
+
+---
+
+### E. Actualizar disponibilidad semanal del owner
+
+| Campo | Valor |
+|---|---|
+| **Método** | `PUT` |
+| **Ruta** | `/api/owner/weekly-availability` |
+| **Auth** | Bearer |
+
+**Query params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `week_start_date` | `YYYY-MM-DD` | ❌ | Sin este param actualiza la plantilla base (todos los lunes futuros). Con él, crea/actualiza override solo para esa semana. |
+
+**Body:**
+```typescript
+{
+  availability: Array<{
+    dayOfWeek: number;   // 0-6
+    startTime: string;   // 'HH:MM'
+    endTime: string;     // 'HH:MM'
+    isActive: boolean;
+  }>
+}
+```
+
+**Respuesta:** misma estructura que GET (sección D).
+
+---
+
+### F. Eliminar override de semana específica
+
+| Campo | Valor |
+|---|---|
+| **Método** | `DELETE` |
+| **Ruta** | `/api/owner/weekly-availability/override` |
+| **Auth** | Bearer |
+
+**Query params:**
+
+| Parámetro | Tipo | Requerido | Descripción |
+|---|---|---|---|
+| `week_start_date` | `YYYY-MM-DD` | ✅ | La semana cuyo override se elimina |
+| `day_of_week` | `number` | ❌ | Sin este param elimina todos los overrides de la semana |
+
+**Respuesta:**
+```typescript
+{ ok: true, deleted: number }  // número de filas eliminadas
+```
+
+**Nota UI:** tras eliminar, la pantalla de disponibilidad muestra la plantilla base como referencia visual.

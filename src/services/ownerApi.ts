@@ -11,6 +11,9 @@ import type {
   OwnerServicesResponse,
   OwnerTimeBlockRow,
   OwnerTimeBlocksResponse,
+  OwnerTimeBlockCreateInput,
+  OwnerTimeBlockCreateResponse,
+  OwnerTimeBlockDeleteResponse,
   OwnerWeeklyAvailabilityResponse,
   OwnerWeeklyAvailabilityRow,
   OwnerWeeklyAvailabilityUpdateInput,
@@ -115,6 +118,26 @@ export async function getOwnerTimeBlocks(params: {
   });
 
   return response.data;
+}
+
+export async function createOwnerTimeBlock(payload: OwnerTimeBlockCreateInput): Promise<OwnerTimeBlockRow> {
+  const response = await apiRequest<OwnerTimeBlockCreateResponse>('/api/owner/time-blocks', {
+    method: 'POST',
+    body: payload,
+    requiresOwnerAuth: true,
+  });
+  return response.timeBlock;
+}
+
+export async function deleteOwnerTimeBlock(id: string): Promise<{ id: string; is_active: false }> {
+  const response = await apiRequest<OwnerTimeBlockDeleteResponse>(
+    `/api/owner/time-blocks/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      requiresOwnerAuth: true,
+    },
+  );
+  return response.timeBlock;
 }
 
 export async function getOwnerMessages(params: OwnerMessagesParams = {}): Promise<OwnerMessagesResponse> {
