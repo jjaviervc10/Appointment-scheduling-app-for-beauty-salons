@@ -12,11 +12,10 @@ import { FloatingActionButton } from '../../src/components/ui/FloatingActionButt
 import { NewAppointmentModal } from '../../src/components/modals/NewAppointmentModal';
 import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
 import { IncidentModal } from '../../src/components/modals/IncidentModal';
-import {
-  MOCK_TIME_BLOCKS,
-} from '../../src/services/mock-data';
 import { fetchAppointmentsByDate, fetchAppointmentsByRange } from '../../src/services/appointments';
+import { fetchTimeBlocks } from '../../src/services/availability';
 import type { AppointmentViewModel } from '../../src/types/models';
+import type { TimeBlock } from '../../src/types/database';
 import { formatLocalDateKey } from '../../src/utils/date';
 
 type AgendaTab = 'day' | 'week' | 'month' | 'availability' | 'blocks';
@@ -56,14 +55,15 @@ export default function AgendaScreen() {
   const [dayAppointments, setDayAppointments] = useState<AppointmentViewModel[]>([]);
   const [weekAppointments, setWeekAppointments] = useState<AppointmentViewModel[]>([]);
   const [monthAppointments, setMonthAppointments] = useState<AppointmentViewModel[]>([]);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
 
   const selectedDateKey = useMemo(() => fmt(selectedDate), [selectedDate]);
 
   const dayBlocks = useMemo(
-    () => MOCK_TIME_BLOCKS.filter(b => b.date === selectedDateKey),
-    [selectedDateKey]
+    () => timeBlocks.filter(b => b.date === selectedDateKey),
+    [selectedDateKey, timeBlocks]
   );
 
   const weekEnd = useMemo(() => {
@@ -83,9 +83,9 @@ export default function AgendaScreen() {
 
   const weekBlocks = useMemo(
     () => {
-      return MOCK_TIME_BLOCKS.filter(b => b.date >= weekStartKey && b.date <= weekEndKey);
+      return timeBlocks.filter(b => b.date >= weekStartKey && b.date <= weekEndKey);
     },
-    [weekStartKey, weekEndKey]
+    [timeBlocks, weekStartKey, weekEndKey]
   );
 
   const loadAppointments = useCallback(async () => {
@@ -93,20 +93,23 @@ export default function AgendaScreen() {
     setAppointmentsError(null);
 
     try {
-      const [dayData, weekData, monthData] = await Promise.all([
+      const [dayData, weekData, monthData, blocksData] = await Promise.all([
         fetchAppointmentsByDate(selectedDateKey),
         fetchAppointmentsByRange(weekStartKey, weekEndKey),
         fetchAppointmentsByRange(monthRange.start, monthRange.end),
+        fetchTimeBlocks(weekStartKey, weekEndKey),
       ]);
 
       setDayAppointments(dayData);
       setWeekAppointments(weekData);
       setMonthAppointments(monthData);
+      setTimeBlocks(blocksData);
     } catch (error) {
       setAppointmentsError(error instanceof Error ? error.message : 'No se pudo cargar la agenda.');
       setDayAppointments([]);
       setWeekAppointments([]);
       setMonthAppointments([]);
+      setTimeBlocks([]);
     } finally {
       setAppointmentsLoading(false);
     }
@@ -178,7 +181,7 @@ export default function AgendaScreen() {
           />
         );
       case 'availability':
-        return <AvailabilityPanel />;
+        return <AvailabilityPanel onGoToBlocks={() => setActiveTab('blocks')} />;
       case 'blocks':
         return <BlocksPanel />;
     }
@@ -232,8 +235,18 @@ export default function AgendaScreen() {
         onNewIncident={() => setShowIncident(true)}
       />
 
-      <NewAppointmentModal visible={showNewAppt} onClose={() => setShowNewAppt(false)} />
-      <BlockTimeModal visible={showBlockTime} onClose={() => setShowBlockTime(false)} />
+      <NewAppointmentModal
+        visible={showNewAppt}
+        onClose={() => setShowNewAppt(false)}
+        onCreated={() => void loadAppointments()}
+      />
+      <BlockTimeModal
+        visible={showBlockTime}
+        onClose={() => {
+          setShowBlockTime(false);
+          void loadAppointments();
+        }}
+      />
       <IncidentModal visible={showIncident} onClose={() => setShowIncident(false)} />
     </View>
   );

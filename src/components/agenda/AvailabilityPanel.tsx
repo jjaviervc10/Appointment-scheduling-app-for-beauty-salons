@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 import type { WeeklyAvailability } from '../../types/database';
 import type { DayOfWeek } from '../../types/enums';
-import { fetchWeeklyAvailability, updateWeeklyAvailability } from '../../services/availability';
+import { fetchWeeklyAvailability, updateWeeklyAvailability, deleteWeekOverride } from '../../services/availability';
 import { isHttpError } from '../../types/api';
 
 const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -23,6 +23,8 @@ function defaultDay(dayOfWeek: DayOfWeek): WeeklyAvailability {
     start_time: dayOfWeek === 6 ? '10:00' : '10:00',
     end_time: dayOfWeek === 6 ? '17:00' : '20:00',
     is_active: false,
+    is_override: false,
+    override_id: null,
     created_at: '',
   };
 }
@@ -107,31 +109,104 @@ function serializeRows(rows: WeeklyAvailability[]): string {
   })));
 }
 
-export function AvailabilityPanel() {
+function getMonday(base: Date): Date {
+  const d = new Date(base);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function computeWeekWindow(weekOffset: number): {
+  weekLabel: string;
+  weekLabelShort: string;
+  isCurrentWeek: boolean;
+  todayDow: DayOfWeek;
+  monday: Date;
+  sunday: Date;
+  dayDates: Record<DayOfWeek, string>;
+  dayMonths: Record<DayOfWeek, string>;
+} {
+  const today = new Date();
+  const todayDow = today.getDay() as DayOfWeek;
+  const monday = getMonday(today);
+  monday.setDate(monday.getDate() + weekOffset * 7);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  const fmt = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
+  const fmtShort = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+  const year = sunday.getFullYear();
+
+  const weekLabel = `Semana del ${fmt(monday)} al ${fmt(sunday)}, ${year}`;
+  const weekLabelShort = `${fmtShort(monday)} — ${fmtShort(sunday)}, ${year}`;
+
+  const dayDates: Partial<Record<DayOfWeek, string>> = {};
+  const dayMonths: Partial<Record<DayOfWeek, string>> = {};
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    const dow = d.getDay() as DayOfWeek;
+    dayDates[dow] = String(d.getDate());
+    dayMonths[dow] = d.toLocaleDateString('es-MX', { month: 'short' });
+  }
+
+  return {
+    weekLabel,
+    weekLabelShort,
+    isCurrentWeek: weekOffset === 0,
+    todayDow,
+    monday,
+    sunday,
+    dayDates: dayDates as Record<DayOfWeek, string>,
+    dayMonths: dayMonths as Record<DayOfWeek, string>,
+  };
+}
+
+interface AvailabilityPanelProps {
+  onGoToBlocks?: () => void;
+}
+
+export function AvailabilityPanel({ onGoToBlocks }: AvailabilityPanelProps = {}) {
   const [availability, setAvailability] = useState<WeeklyAvailability[]>([]);
   const [lastSavedSnapshot, setLastSavedSnapshot] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingDay, setEditingDay] = useState<DayOfWeek | null>(null);
+  const [hasOverrides, setHasOverrides] = useState(false);
   const { width } = useWindowDimensions();
   const isMobile = width < 600;
+
+  const [weekOffset, setWeekOffset] = useState(0);
 
   const isDirty = useMemo(
     () => serializeRows(availability) !== lastSavedSnapshot,
     [availability, lastSavedSnapshot]
   );
 
-  const loadAvailability = useCallback(async () => {
+  const weekContext = useMemo(() => computeWeekWindow(weekOffset), [weekOffset]);
+
+  // ISO date of the Monday of the navigated week — sent to the API as week_start_date
+  const weekStartDate = useMemo(() => {
+    const d = weekContext.monday;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, [weekContext]);
+
+  const loadAvailability = useCallback(async (wsd?: string) => {
     setLoading(true);
     setError(null);
     setNotice(null);
 
     try {
-      const data = normalizeAvailability(await fetchWeeklyAvailability());
+      const result = await fetchWeeklyAvailability(wsd);
+      const data = normalizeAvailability(result.data);
       setAvailability(data);
       setLastSavedSnapshot(serializeRows(data));
+      setHasOverrides(result.hasOverrides);
     } catch (loadError) {
       if (isHttpError(loadError) && loadError.status === 401) {
         setError('No autorizado. Verifica el token owner configurado para Netlify.');
@@ -147,9 +222,11 @@ export function AvailabilityPanel() {
     }
   }, []);
 
+  // Re-load when week changes
   useEffect(() => {
-    void loadAvailability();
-  }, [loadAvailability]);
+    void loadAvailability(weekContext.isCurrentWeek ? undefined : weekStartDate);
+    setEditingDay(null);
+  }, [weekStartDate, weekContext.isCurrentWeek, loadAvailability]);
 
   const updateDay = useCallback((dayOfWeek: DayOfWeek, patch: Partial<WeeklyAvailability>) => {
     setNotice(null);
@@ -182,6 +259,15 @@ export function AvailabilityPanel() {
   const copyToAll = useCallback((sourceDow: DayOfWeek) => {
     const source = availability.find(a => a.day_of_week === sourceDow);
     if (!source) return;
+    const dayName = DAYS_ES[sourceDow];
+    const action = source.is_active
+      ? `Copiar ${format12Display(source.start_time)}–${format12Display(source.end_time)} de ${dayName} a todos los días`
+      : `Marcar todos los días como Cerrado (igual que ${dayName})`;
+    // En web usamos confirm(); en nativo se podría usar Alert.alert
+    // eslint-disable-next-line no-alert
+    if (typeof window !== 'undefined' && window.confirm) {
+      if (!window.confirm(`¿${action}?\n\nEsta acción sobreescribirá el horario de los 7 días.`)) return;
+    }
     setNotice(null);
     setAvailability((prev) =>
       normalizeAvailability(prev).map((row) => ({
@@ -205,18 +291,27 @@ export function AvailabilityPanel() {
     setError(null);
     setNotice(null);
 
+    // When navigating a non-current week, save as week-specific override
+    const targetWeek = weekContext.isCurrentWeek ? undefined : weekStartDate;
+
     try {
-      const saved = normalizeAvailability(await updateWeeklyAvailability(
+      const result = await updateWeeklyAvailability(
         normalized.map((row) => ({
           dayOfWeek: row.day_of_week,
           startTime: toApiTime(row.start_time),
           endTime: toApiTime(row.end_time),
           isActive: row.is_active,
-        }))
-      ));
+        })),
+        targetWeek
+      );
+      const saved = normalizeAvailability(result.data);
       setAvailability(saved);
       setLastSavedSnapshot(serializeRows(saved));
-      setNotice('Disponibilidad guardada correctamente.');
+      setHasOverrides(result.hasOverrides);
+      setNotice(targetWeek
+        ? `Horario de la semana del ${weekContext.weekLabelShort} guardado correctamente.`
+        : 'Disponibilidad guardada correctamente.'
+      );
     } catch (saveError) {
       if (isHttpError(saveError) && saveError.status === 400) {
         setNotice(saveError.message);
@@ -230,9 +325,30 @@ export function AvailabilityPanel() {
     } finally {
       setSaving(false);
     }
-  }, [availability]);
+  }, [availability, weekContext, weekStartDate]);
 
-  const renderTimeInput = (dow: DayOfWeek, field: FieldName, time24: string, label: string) => {
+  const handleResetOverrides = useCallback(async () => {
+    if (!hasOverrides) return;
+    // eslint-disable-next-line no-alert
+    if (typeof window !== 'undefined' && window.confirm) {
+      if (!window.confirm(
+        `¿Eliminar el horario personalizado de la semana del ${weekContext.weekLabelShort}?\n\nSe volverá a aplicar el horario base.`
+      )) return;
+    }
+    setResetting(true);
+    setNotice(null);
+    try {
+      await deleteWeekOverride(weekStartDate);
+      await loadAvailability(weekStartDate);
+      setNotice('Horario personalizado eliminado. Se aplica el horario base.');
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'No se pudo eliminar el horario personalizado.');
+    } finally {
+      setResetting(false);
+    }
+  }, [hasOverrides, weekStartDate, weekContext.weekLabelShort, loadAvailability]);
+
+  const renderTimeInput = (dow: DayOfWeek, field: FieldName, time24: string, label: string, disabled = false) => {
     const { hour, minute, period } = to12h(time24);
     return (
       <View style={styles.timeField}>
@@ -240,12 +356,13 @@ export function AvailabilityPanel() {
         <View style={styles.timeInputRow}>
           <View style={styles.inputGroup}>
             <TextInput
-              style={styles.timeInput}
+              style={[styles.timeInput, disabled && styles.timeInputDisabled]}
               value={hour}
-              onChangeText={(val) => updateTimePart(dow, field, 'hour', val, time24)}
+              onChangeText={(val) => !disabled && updateTimePart(dow, field, 'hour', val, time24)}
               keyboardType="number-pad"
               maxLength={2}
               selectTextOnFocus
+              editable={!disabled}
               placeholder="12"
               placeholderTextColor={colors.gray300}
             />
@@ -255,29 +372,30 @@ export function AvailabilityPanel() {
 
           <View style={styles.inputGroup}>
             <TextInput
-              style={styles.timeInput}
+              style={[styles.timeInput, disabled && styles.timeInputDisabled]}
               value={minute}
-              onChangeText={(val) => updateTimePart(dow, field, 'minute', val, time24)}
+              onChangeText={(val) => !disabled && updateTimePart(dow, field, 'minute', val, time24)}
               keyboardType="number-pad"
               maxLength={2}
               selectTextOnFocus
+              editable={!disabled}
               placeholder="00"
               placeholderTextColor={colors.gray300}
             />
           </View>
 
-          <View style={styles.periodToggle}>
+          <View style={[styles.periodToggle, disabled && styles.periodToggleDisabled]}>
             <TouchableOpacity
               style={[styles.periodBtn, period === 'AM' && styles.periodBtnActive]}
-              onPress={() => updateTimePart(dow, field, 'period', 'AM', time24)}
-              activeOpacity={0.7}
+              onPress={() => !disabled && updateTimePart(dow, field, 'period', 'AM', time24)}
+              activeOpacity={disabled ? 1 : 0.7}
             >
               <Text style={[styles.periodText, period === 'AM' && styles.periodTextActive]}>AM</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.periodBtn, period === 'PM' && styles.periodBtnActive]}
-              onPress={() => updateTimePart(dow, field, 'period', 'PM', time24)}
-              activeOpacity={0.7}
+              onPress={() => !disabled && updateTimePart(dow, field, 'period', 'PM', time24)}
+              activeOpacity={disabled ? 1 : 0.7}
             >
               <Text style={[styles.periodText, period === 'PM' && styles.periodTextActive]}>PM</Text>
             </TouchableOpacity>
@@ -315,8 +433,54 @@ export function AvailabilityPanel() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Horarios laborales</Text>
-        <Text style={styles.subtitle}>Configura tu disponibilidad semanal</Text>
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerTitleBlock}>
+            <Text style={styles.title}>Horarios disponibles</Text>
+            <Text style={styles.subtitle}>Configura los días y horas en que recibes citas</Text>
+          </View>
+        </View>
+
+        {/* Week navigator */}
+        <View style={styles.weekNav}>
+          <TouchableOpacity
+            style={styles.weekNavArrow}
+            onPress={() => setWeekOffset(o => o - 1)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chevron-back" size={18} color={colors.gray300} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.weekNavCenter}
+            onPress={() => setWeekOffset(0)}
+            activeOpacity={weekContext.isCurrentWeek ? 1 : 0.7}
+          >
+            <Text style={styles.weekNavLabel} numberOfLines={1}>
+              {weekContext.weekLabelShort}
+            </Text>
+            {weekContext.isCurrentWeek ? (
+              <View style={styles.weekNavCurrentBadge}>
+                <Text style={styles.weekNavCurrentBadgeText}>Esta semana</Text>
+              </View>
+            ) : (
+              <Text style={styles.weekNavReturnHint}>Toca para volver a esta semana</Text>
+            )}
+            {!weekContext.isCurrentWeek && hasOverrides ? (
+              <View style={styles.weekNavOverrideBadge}>
+                <Ionicons name="pencil" size={9} color={colors.info} />
+                <Text style={styles.weekNavOverrideBadgeText}>Horario personalizado</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.weekNavArrow}
+            onPress={() => setWeekOffset(o => o + 1)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chevron-forward" size={18} color={colors.gray300} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -354,11 +518,22 @@ export function AvailabilityPanel() {
                 return (
                   <TouchableOpacity
                     key={dow}
-                    style={[styles.previewCol, isMobile && styles.previewColMobile]}
+                    style={[
+                      styles.previewCol,
+                      isMobile && styles.previewColMobile,
+                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewColToday,
+                    ]}
                     onPress={() => { setEditingDay(dow); }}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.previewDay}>{DAYS_SHORT[dow]}</Text>
+                    <Text style={[
+                      styles.previewDay,
+                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewDayToday,
+                    ]}>{DAYS_SHORT[dow]}</Text>
+                    <Text style={[
+                      styles.previewDate,
+                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewDateToday,
+                    ]}>{weekContext.dayDates[dow]} {weekContext.dayMonths[dow]}</Text>
                     <View style={[styles.previewBar, !isActive && styles.previewBarInactive]}>
                       {isActive ? (
                         <>
@@ -402,6 +577,11 @@ export function AvailabilityPanel() {
                       <Text style={[styles.dayName, !isActive && styles.dayNameInactive]}>
                         {DAYS_ES[dow]}
                       </Text>
+                      {day.is_override ? (
+                        <View style={styles.overrideDot}>
+                          <Ionicons name="pencil" size={9} color={colors.info} />
+                        </View>
+                      ) : null}
                     </View>
                     <View style={styles.dayCardRight}>
                       {isActive ? (
@@ -421,12 +601,20 @@ export function AvailabilityPanel() {
 
                   {isExpanded && (
                     <View style={[styles.dayExpanded, isMobile && styles.dayExpandedMobile]}>
+                      {!isActive && (
+                        <View style={styles.inactiveDayHint}>
+                          <Ionicons name="lock-closed-outline" size={14} color={colors.gray500} />
+                          <Text style={styles.inactiveDayHintText}>
+                            Activa este día para editar su horario.
+                          </Text>
+                        </View>
+                      )}
                       <View style={[styles.timeRow, isMobile && styles.timeRowMobile, !isActive && styles.timeRowDisabled]}>
-                        {renderTimeInput(dow, 'start_time', day.start_time, 'Desde')}
+                        {renderTimeInput(dow, 'start_time', day.start_time, 'Desde', !isActive)}
                         <View style={styles.timeDivider}>
                           <Ionicons name="arrow-forward" size={16} color={colors.gray300} />
                         </View>
-                        {renderTimeInput(dow, 'end_time', day.end_time, 'Hasta')}
+                        {renderTimeInput(dow, 'end_time', day.end_time, 'Hasta', !isActive)}
                       </View>
                       <TouchableOpacity
                         style={styles.copyBtn}
@@ -444,6 +632,24 @@ export function AvailabilityPanel() {
           </View>
         ) : null}
 
+        {!weekContext.isCurrentWeek && hasOverrides && !isDirty ? (
+          <TouchableOpacity
+            style={[styles.resetBtn, resetting && styles.resetBtnDisabled]}
+            onPress={() => void handleResetOverrides()}
+            disabled={resetting}
+            activeOpacity={0.7}
+          >
+            {resetting ? (
+              <ActivityIndicator size="small" color={colors.info} />
+            ) : (
+              <Ionicons name="refresh-outline" size={16} color={colors.info} />
+            )}
+            <Text style={styles.resetBtnText}>
+              {resetting ? 'Eliminando...' : 'Usar horario base esta semana'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
         <TouchableOpacity
           style={[styles.saveBtn, (!isDirty || saving) && styles.saveBtnDisabled, isMobile && styles.saveBtnMobile]}
           activeOpacity={0.7}
@@ -456,7 +662,11 @@ export function AvailabilityPanel() {
             <Ionicons name="checkmark-circle-outline" size={20} color={!isDirty ? colors.gray500 : colors.black} />
           )}
           <Text style={[styles.saveBtnText, (!isDirty || saving) && styles.saveBtnTextDisabled]}>
-            {saving ? 'Guardando...' : 'Guardar disponibilidad'}
+            {saving
+              ? 'Guardando...'
+              : weekContext.isCurrentWeek
+                ? 'Guardar disponibilidad'
+                : 'Guardar horario de esta semana'}
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -509,11 +719,89 @@ const styles = StyleSheet.create({
     color: colors.black,
   },
   header: {
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    backgroundColor: colors.black, borderBottomWidth: 1, borderBottomColor: colors.gray800,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: 0,
+    backgroundColor: colors.black,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray800,
+    gap: spacing.sm,
   },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  headerTitleBlock: { flex: 1 },
   title: { ...typography.h3, color: colors.white, fontSize: 16 },
   subtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
+  weekNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    marginHorizontal: -spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray800,
+    backgroundColor: colors.gray900 + 'CC',
+  },
+  weekNavArrow: {
+    width: 44,
+    height: 52,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  weekNavCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 52,
+    gap: 3,
+  },
+  weekNavLabel: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  weekNavCurrentBadge: {
+    backgroundColor: colors.gold + '20',
+    borderRadius: radii.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.gold + '50',
+  },
+  weekNavCurrentBadgeText: {
+    ...typography.caption,
+    color: colors.gold,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  weekNavReturnHint: {
+    ...typography.caption,
+    color: colors.gray500,
+    fontSize: 10,
+  },
+  weekNavOverrideBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.info + '18',
+    borderRadius: radii.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.info + '40',
+    marginTop: 2,
+  },
+  weekNavOverrideBadgeText: {
+    ...typography.caption,
+    color: colors.info,
+    fontSize: 9,
+    fontWeight: '700',
+  },
   scrollView: { flex: 1 },
   scrollContent: { padding: spacing.xl },
   scrollContentMobile: { padding: spacing.md },
@@ -572,7 +860,56 @@ const styles = StyleSheet.create({
   weekPreviewMobile: { gap: spacing.sm, paddingHorizontal: spacing.sm },
   previewCol: { flex: 1, alignItems: 'center', gap: spacing.xs, minWidth: 56 },
   previewColMobile: { flex: undefined, width: 64 },
+  weekContextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 6,
+  },
+  weekContextText: {
+    ...typography.caption,
+    color: colors.gray500,
+    fontSize: 11,
+  },
+  weekContextDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: colors.gray600,
+  },
+  previewColToday: {
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.gold + '60',
+    backgroundColor: colors.gold + '08',
+  },
   previewDay: { ...typography.caption, color: colors.gray500, fontSize: 11, textTransform: 'uppercase', fontWeight: '600' },
+  previewDayToday: { color: colors.gold },
+  previewDate: { ...typography.caption, color: colors.gray600, fontSize: 10, marginTop: 2 },
+  previewDateToday: { color: colors.gold, fontWeight: '700' },
+  inactiveDayHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gray800,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  inactiveDayHintText: {
+    ...typography.caption,
+    color: colors.gray500,
+    fontSize: 12,
+  },
+  timeInputDisabled: {
+    backgroundColor: colors.gray700,
+    color: colors.gray500,
+    borderColor: colors.gray700,
+  },
+  periodToggleDisabled: {
+    opacity: 0.4,
+  },
   previewBar: {
     width: '100%', height: 56, backgroundColor: colors.gold + '10',
     borderRadius: radii.sm, alignItems: 'center', justifyContent: 'space-between',
@@ -662,4 +999,34 @@ const styles = StyleSheet.create({
   saveBtnMobile: { paddingVertical: spacing.md, marginTop: spacing.lg },
   saveBtnText: { ...typography.button, color: colors.black },
   saveBtnTextDisabled: { color: colors.gray500 },
+  overrideDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.info + '20',
+    borderWidth: 1,
+    borderColor: colors.info + '50',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
+  },
+  resetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.info + '50',
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.info + '08',
+  },
+  resetBtnDisabled: { opacity: 0.5 },
+  resetBtnText: {
+    ...typography.bodySmall,
+    color: colors.info,
+    fontWeight: '600',
+  },
 });

@@ -84,6 +84,36 @@ export interface OwnerClientDetailResponse {
   appointments: OwnerClientAppointmentRow[];
 }
 
+export interface OwnerServiceRow {
+  id: string;
+  name: string;
+  duration_minutes: number;
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  is_active: boolean;
+}
+
+export interface OwnerServicesResponse {
+  ok: true;
+  data: OwnerServiceRow[];
+}
+
+export interface OwnerTimeBlockRow {
+  id: string;
+  block_type: string;
+  reason: string | null;
+  is_recurring: boolean;
+  day_of_week: number | null;
+  specific_date: string | null;
+  start_time: string;
+  end_time: string;
+}
+
+export interface OwnerTimeBlocksResponse {
+  ok: true;
+  data: OwnerTimeBlockRow[];
+}
+
 export interface OwnerAppointmentMutationResult {
   id: string;
   status: AppointmentStatus;
@@ -102,11 +132,20 @@ export interface OwnerWeeklyAvailabilityRow {
   startTime: string;
   endTime: string;
   isActive: boolean;
+  isOverride: boolean;
+  overrideId: string | null;
 }
 
 export interface OwnerWeeklyAvailabilityResponse {
   ok: true;
+  week_start_date?: string;
+  hasOverrides?: boolean;
   availability: OwnerWeeklyAvailabilityRow[];
+}
+
+export interface OwnerWeeklyAvailabilityDeleteResponse {
+  ok: true;
+  deletedCount: number;
 }
 
 export interface OwnerWeeklyAvailabilityUpdateInput {

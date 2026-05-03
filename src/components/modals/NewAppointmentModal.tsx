@@ -1,91 +1,245 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  TextInput,
-  useWindowDimensions,
+  ActivityIndicator,
   Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radii, shadows } from '../../theme';
-import { MOCK_CLIENTS, MOCK_SERVICES } from '../../services/mock-data';
+import { colors, spacing, typography, radii } from '../../theme';
+import { createPublicBookingRequest, getPublicAvailability } from '../../services/bookingApi';
+import { getOwnerClients, getOwnerServices } from '../../services/ownerApi';
+import type { OwnerClientRow, OwnerServiceRow, PublicAvailabilitySlot } from '../../types/api';
+import { isHttpError } from '../../types/api';
+import { formatLocalDateKey, getIsoDateKey } from '../../utils/date';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  onCreated?: () => void;
 }
 
-function clampHour(v: string): string {
-  const n = parseInt(v, 10);
-  if (isNaN(n)) return '';
-  if (n < 1) return '1';
-  if (n > 12) return '12';
-  return String(n);
-}
-function clampMinute(v: string): string {
-  const n = parseInt(v, 10);
-  if (isNaN(n)) return '';
-  if (n < 0) return '00';
-  if (n > 59) return '59';
-  return v.length === 1 ? v : String(n).padStart(2, '0');
+type Step = 1 | 2 | 3;
+
+const PAGE_SIZE = 50;
+
+function getMonday(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
 }
 
-export function NewAppointmentModal({ visible, onClose }: Props) {
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function fmt(date: Date): string {
+  return formatLocalDateKey(date);
+}
+
+function formatHour(isoDateTime: string): string {
+  return new Date(isoDateTime).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+}
+
+function mapError(error: unknown): string {
+  if (isHttpError(error)) {
+    if (error.status === 400) return error.message || 'Revisa los datos de la cita.';
+    if (error.status === 401) return 'No autorizado. Verifica el token owner.';
+    if (error.status === 404) return 'Cliente, servicio o horario no encontrado.';
+    if (error.status === 409) return 'Ese horario ya no esta disponible. Elige otro.';
+    if (error.status === 422) return error.message || 'La cita no cumple una regla de negocio.';
+    if (error.status === 429) return 'Demasiados intentos. Intenta mas tarde.';
+    return error.message || 'No se pudo completar la accion.';
+  }
+  return error instanceof Error ? error.message : 'Error desconocido al conectar con backend.';
+}
+
+export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const [selectedClient, setSelectedClient] = useState<string | null>(null);
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-  const [hourText, setHourText] = useState('10');
-  const [minuteText, setMinuteText] = useState('00');
-  const [period, setPeriod] = useState<'AM' | 'PM'>('AM');
+  const [step, setStep] = useState<Step>(1);
+  const [clients, setClients] = useState<OwnerClientRow[]>([]);
+  const [services, setServices] = useState<OwnerServiceRow[]>([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedSlotStartAt, setSelectedSlotStartAt] = useState('');
+  const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [notes, setNotes] = useState('');
-  const [step, setStep] = useState<1 | 2 | 3>(1);
 
-  const client = MOCK_CLIENTS.find(c => c.id === selectedClient);
-  const service = MOCK_SERVICES.find(s => s.id === selectedService);
+  const selectedClient = useMemo(
+    () => clients.find((client) => client.id === selectedClientId) ?? null,
+    [clients, selectedClientId]
+  );
 
-  const displayTime = `${hourText || '12'}:${minuteText || '00'} ${period}`;
+  const selectedService = useMemo(
+    () => services.find((service) => service.id === selectedServiceId) ?? null,
+    [services, selectedServiceId]
+  );
 
-  const handleCreate = () => {
-    Alert.alert(
-      '✅ Cita creada (simulación)',
-      `Cliente: ${client?.name}\nServicio: ${service?.name}\nHora: ${displayTime}\nDuración: ${service?.duration_minutes} min\nPrecio: $${service?.price}`,
-      [{ text: 'OK', onPress: onClose }],
-    );
-    resetForm();
-  };
+  const weekStartKey = useMemo(() => fmt(weekStart), [weekStart]);
 
-  const resetForm = () => {
-    setSelectedClient(null);
-    setSelectedService(null);
-    setHourText('10');
-    setMinuteText('00');
-    setPeriod('AM');
-    setNotes('');
+  const availableDates = useMemo(
+    () => Array.from(new Set(availabilitySlots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort(),
+    [availabilitySlots]
+  );
+
+  const visibleSlots = useMemo(
+    () => availabilitySlots
+      .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
+      .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime()),
+    [availabilitySlots, selectedDate]
+  );
+
+  const resetForm = useCallback(() => {
     setStep(1);
-  };
+    setQuery('');
+    setSelectedClientId(null);
+    setSelectedServiceId(null);
+    setWeekStart(getMonday(new Date()));
+    setSelectedDate('');
+    setSelectedSlotStartAt('');
+    setAvailabilitySlots([]);
+    setNotes('');
+    setError(null);
+    setSubmitting(false);
+  }, []);
 
-  const handleClose = () => {
+  const loadClients = useCallback(async (search = '') => {
+    setClientsLoading(true);
+    setError(null);
+    try {
+      const result = await getOwnerClients({ search: search.trim() || undefined, page: 1, limit: PAGE_SIZE });
+      setClients(result.data);
+    } catch (loadError) {
+      setClients([]);
+      setError(mapError(loadError));
+    } finally {
+      setClientsLoading(false);
+    }
+  }, []);
+
+  const loadServices = useCallback(async () => {
+    setServicesLoading(true);
+    setError(null);
+    try {
+      const result = await getOwnerServices({ active: true });
+      setServices(result);
+      setSelectedServiceId((prev) => prev ?? result[0]?.id ?? null);
+    } catch (loadError) {
+      setServices([]);
+      setError(mapError(loadError));
+    } finally {
+      setServicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    void loadClients();
+    void loadServices();
+  }, [loadClients, loadServices, visible]);
+
+  useEffect(() => {
+    if (!visible || !selectedServiceId) {
+      setAvailabilitySlots([]);
+      return;
+    }
+
+    let cancelled = false;
+    setAvailabilityLoading(true);
+    setError(null);
+
+    getPublicAvailability(selectedServiceId, weekStartKey)
+      .then((slots) => {
+        if (cancelled) return;
+        setAvailabilitySlots(slots);
+        const dates = Array.from(new Set(slots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort();
+        setSelectedDate((prev) => (prev && dates.includes(prev) ? prev : dates[0] ?? ''));
+        setSelectedSlotStartAt('');
+      })
+      .catch((availabilityError) => {
+        if (cancelled) return;
+        setAvailabilitySlots([]);
+        setSelectedDate('');
+        setSelectedSlotStartAt('');
+        setError(mapError(availabilityError));
+      })
+      .finally(() => {
+        if (!cancelled) setAvailabilityLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedServiceId, visible, weekStartKey]);
+
+  const handleSearch = useCallback((value: string) => {
+    setQuery(value);
+    void loadClients(value);
+  }, [loadClients]);
+
+  const handleClose = useCallback(() => {
     resetForm();
     onClose();
-  };
+  }, [onClose, resetForm]);
 
-  const canAdvance = () => {
-    if (step === 1) return !!selectedClient;
-    if (step === 2) return !!selectedService;
-    return true;
-  };
+  const handleSubmit = useCallback(async () => {
+    if (!selectedClient || !selectedServiceId || !selectedSlotStartAt || submitting) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await createPublicBookingRequest({
+        fullName: selectedClient.full_name,
+        phone: selectedClient.phone,
+        serviceId: selectedServiceId,
+        startAt: selectedSlotStartAt,
+        notes: notes.trim() || undefined,
+      });
+
+      Alert.alert(
+        'Solicitud creada',
+        `La cita quedo registrada como ${response.appointment.status}. Puedes aprobarla desde pendientes.`,
+        [{ text: 'OK' }]
+      );
+      onCreated?.();
+      handleClose();
+    } catch (submitError) {
+      setError(mapError(submitError));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [handleClose, notes, onCreated, selectedClient, selectedServiceId, selectedSlotStartAt, submitting]);
+
+  const canAdvance = step === 1 ? !!selectedClient : step === 2 ? !!selectedServiceId : !!selectedSlotStartAt;
+  const bodyLoading = (step === 1 && clientsLoading) || (step === 2 && servicesLoading);
+  const weekEnd = addDays(weekStart, 6);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <View style={[styles.card, isMobile && styles.cardMobile]}>
-          {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.headerIcon}>
@@ -98,137 +252,189 @@ export function NewAppointmentModal({ visible, onClose }: Props) {
             </TouchableOpacity>
           </View>
 
-          {/* Steps indicator */}
           <View style={styles.steps}>
-            {[1, 2, 3].map(s => (
-              <View key={s} style={styles.stepRow}>
-                <View style={[styles.stepDot, step >= s && styles.stepDotActive]}>
-                  {step > s ? (
+            {[1, 2, 3].map((item) => (
+              <View key={item} style={styles.stepRow}>
+                <View style={[styles.stepDot, step >= item && styles.stepDotActive]}>
+                  {step > item ? (
                     <Ionicons name="checkmark" size={12} color={colors.white} />
                   ) : (
-                    <Text style={[styles.stepNum, step >= s && styles.stepNumActive]}>{s}</Text>
+                    <Text style={[styles.stepNum, step >= item && styles.stepNumActive]}>{item}</Text>
                   )}
                 </View>
-                <Text style={[styles.stepLabel, step >= s && styles.stepLabelActive]}>
-                  {s === 1 ? 'Cliente' : s === 2 ? 'Servicio' : 'Horario'}
+                <Text style={[styles.stepLabel, step >= item && styles.stepLabelActive]}>
+                  {item === 1 ? 'Cliente' : item === 2 ? 'Servicio' : 'Horario'}
                 </Text>
-                {s < 3 && <View style={[styles.stepLine, step > s && styles.stepLineActive]} />}
+                {item < 3 ? <View style={[styles.stepLine, step > item && styles.stepLineActive]} /> : null}
               </View>
             ))}
           </View>
 
-          {/* Content */}
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-            {step === 1 && (
+            {error ? (
+              <TouchableOpacity style={styles.errorBanner} onPress={() => setError(null)} activeOpacity={0.8}>
+                <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                <Text style={styles.errorText}>{error}</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            {bodyLoading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color={colors.gold} />
+                <Text style={styles.loadingText}>Sincronizando con backend...</Text>
+              </View>
+            ) : null}
+
+            {step === 1 ? (
               <>
                 <Text style={styles.sectionTitle}>Selecciona un cliente</Text>
-                {MOCK_CLIENTS.map(c => {
-                  const isSelected = selectedClient === c.id;
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={handleSearch}
+                  placeholder="Buscar por nombre o celular"
+                  placeholderTextColor={colors.gray400}
+                />
+                {clients.length === 0 && !clientsLoading ? (
+                  <Text style={styles.emptyText}>No hay clientes para mostrar.</Text>
+                ) : null}
+                {clients.map((client) => {
+                  const isSelected = selectedClientId === client.id;
                   return (
                     <TouchableOpacity
-                      key={c.id}
+                      key={client.id}
                       style={[styles.optionCard, isSelected && styles.optionCardSelected]}
-                      onPress={() => setSelectedClient(c.id)}
+                      onPress={() => setSelectedClientId(client.id)}
                       activeOpacity={0.7}
                     >
                       <View style={[styles.avatar, isSelected && styles.avatarSelected]}>
                         <Text style={[styles.avatarText, isSelected && styles.avatarTextSelected]}>
-                          {c.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                          {client.full_name.split(' ').map((word) => word[0]).join('').slice(0, 2)}
                         </Text>
                       </View>
                       <View style={styles.optionInfo}>
-                        <Text style={[styles.optionName, isSelected && styles.optionNameSelected]}>{c.name}</Text>
-                        <Text style={styles.optionSub}>{c.phone} · {c.totalAppts} visitas</Text>
+                        <Text style={[styles.optionName, isSelected && styles.optionNameSelected]}>{client.full_name}</Text>
+                        <Text style={styles.optionSub}>{client.phone}</Text>
                       </View>
-                      {isSelected && <Ionicons name="checkmark-circle" size={22} color={colors.gold} />}
+                      {isSelected ? <Ionicons name="checkmark-circle" size={22} color={colors.gold} /> : null}
                     </TouchableOpacity>
                   );
                 })}
               </>
-            )}
+            ) : null}
 
-            {step === 2 && (
+            {step === 2 ? (
               <>
                 <Text style={styles.sectionTitle}>Selecciona un servicio</Text>
-                {MOCK_SERVICES.map(s => {
-                  const isSelected = selectedService === s.id;
+                {services.length === 0 && !servicesLoading ? (
+                  <Text style={styles.emptyText}>No hay servicios activos configurados.</Text>
+                ) : null}
+                {services.map((service) => {
+                  const isSelected = selectedServiceId === service.id;
                   return (
                     <TouchableOpacity
-                      key={s.id}
+                      key={service.id}
                       style={[styles.optionCard, isSelected && styles.optionCardSelected]}
-                      onPress={() => setSelectedService(s.id)}
+                      onPress={() => {
+                        setSelectedServiceId(service.id);
+                        setSelectedSlotStartAt('');
+                      }}
                       activeOpacity={0.7}
                     >
                       <View style={[styles.serviceIcon, isSelected && styles.serviceIconSelected]}>
                         <Ionicons name="cut" size={18} color={isSelected ? colors.white : colors.gold} />
                       </View>
                       <View style={styles.optionInfo}>
-                        <Text style={[styles.optionName, isSelected && styles.optionNameSelected]}>{s.name}</Text>
-                        <Text style={styles.optionSub}>{s.duration_minutes} min · ${s.price} MXN</Text>
+                        <Text style={[styles.optionName, isSelected && styles.optionNameSelected]}>{service.name}</Text>
+                        <Text style={styles.optionSub}>
+                          {service.duration_minutes} min
+                        </Text>
                       </View>
-                      {isSelected && <Ionicons name="checkmark-circle" size={22} color={colors.gold} />}
+                      {isSelected ? <Ionicons name="checkmark-circle" size={22} color={colors.gold} /> : null}
                     </TouchableOpacity>
                   );
                 })}
               </>
-            )}
+            ) : null}
 
-            {step === 3 && (
+            {step === 3 ? (
               <>
-                <Text style={styles.sectionTitle}>Horario y notas</Text>
-
-                {/* Summary */}
+                <Text style={styles.sectionTitle}>Fecha y horario</Text>
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryLabel}>Cliente</Text>
-                  <Text style={styles.summaryValue}>{client?.name}</Text>
+                  <Text style={styles.summaryValue}>{selectedClient?.full_name}</Text>
                   <Text style={styles.summaryLabel}>Servicio</Text>
-                  <Text style={styles.summaryValue}>{service?.name} · {service?.duration_minutes} min · ${service?.price}</Text>
+                  <Text style={styles.summaryValue}>
+                    {selectedService?.name} - {selectedService?.duration_minutes} min
+                  </Text>
                 </View>
 
-                {/* Time input */}
-                <Text style={styles.fieldLabel}>Hora</Text>
-                <View style={styles.manualTimeRow}>
-                  <View style={styles.timeInputGroup}>
-                    <TextInput
-                      style={styles.timeInput}
-                      value={hourText}
-                      onChangeText={(v) => setHourText(clampHour(v.replace(/[^0-9]/g, '')))}
-                      keyboardType="number-pad"
-                      maxLength={2}
-                      placeholder="HH"
-                      placeholderTextColor={colors.gray400}
-                    />
-                    <Text style={styles.timeSeparator}>:</Text>
-                    <TextInput
-                      style={styles.timeInput}
-                      value={minuteText}
-                      onChangeText={(v) => setMinuteText(clampMinute(v.replace(/[^0-9]/g, '')))}
-                      keyboardType="number-pad"
-                      maxLength={2}
-                      placeholder="MM"
-                      placeholderTextColor={colors.gray400}
-                    />
+                <View style={styles.weekNav}>
+                  <TouchableOpacity style={styles.navBtn} onPress={() => setWeekStart((prev) => addDays(prev, -7))}>
+                    <Ionicons name="chevron-back" size={18} color={colors.gray400} />
+                  </TouchableOpacity>
+                  <Text style={styles.weekLabel}>
+                    {weekStart.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} - {weekEnd.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}
+                  </Text>
+                  <TouchableOpacity style={styles.navBtn} onPress={() => setWeekStart((prev) => addDays(prev, 7))}>
+                    <Ionicons name="chevron-forward" size={18} color={colors.gray400} />
+                  </TouchableOpacity>
+                </View>
+
+                {availabilityLoading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator size="small" color={colors.gold} />
+                    <Text style={styles.loadingText}>Cargando disponibilidad real...</Text>
                   </View>
-                  <View style={styles.periodToggle}>
-                    <TouchableOpacity
-                      style={[styles.periodBtn, period === 'AM' && styles.periodBtnActive]}
-                      onPress={() => setPeriod('AM')}
-                    >
-                      <Text style={[styles.periodText, period === 'AM' && styles.periodTextActive]}>AM</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.periodBtn, period === 'PM' && styles.periodBtnActive]}
-                      onPress={() => setPeriod('PM')}
-                    >
-                      <Text style={[styles.periodText, period === 'PM' && styles.periodTextActive]}>PM</Text>
-                    </TouchableOpacity>
-                  </View>
+                ) : null}
+
+                <View style={styles.chipWrap}>
+                  {availableDates.map((dateKey) => {
+                    const active = selectedDate === dateKey;
+                    const date = new Date(`${dateKey}T12:00:00`);
+                    return (
+                      <TouchableOpacity
+                        key={dateKey}
+                        style={[styles.dateChip, active && styles.dateChipActive]}
+                        onPress={() => {
+                          setSelectedDate(dateKey);
+                          setSelectedSlotStartAt('');
+                        }}
+                      >
+                        <Text style={[styles.dateChipText, active && styles.dateChipTextActive]}>
+                          {date.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric' })}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {!availabilityLoading && availableDates.length === 0 ? (
+                  <Text style={styles.emptyText}>Sin disponibilidad para esta semana.</Text>
+                ) : null}
+
+                <View style={styles.slotGrid}>
+                  {visibleSlots.map((slot) => {
+                    const active = selectedSlotStartAt === slot.slotStartAt;
+                    return (
+                      <TouchableOpacity
+                        key={slot.slotStartAt}
+                        style={[styles.slotBtn, active && styles.slotBtnActive]}
+                        onPress={() => setSelectedSlotStartAt(slot.slotStartAt)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.slotText, active && styles.slotTextActive]}>
+                          {formatHour(slot.slotStartAt)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
                 <Text style={styles.fieldLabel}>Notas (opcional)</Text>
                 <TextInput
-                  style={styles.textInput}
-                  placeholder="Ej: Cliente solicita corte corto..."
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="Detalles para la cita"
                   placeholderTextColor={colors.gray400}
                   value={notes}
                   onChangeText={setNotes}
@@ -236,32 +442,40 @@ export function NewAppointmentModal({ visible, onClose }: Props) {
                   numberOfLines={3}
                 />
               </>
-            )}
+            ) : null}
           </ScrollView>
 
-          {/* Footer */}
           <View style={styles.footer}>
-            {step > 1 && (
-              <TouchableOpacity style={styles.btnBack} onPress={() => setStep((step - 1) as 1 | 2)}>
+            {step > 1 ? (
+              <TouchableOpacity style={styles.btnBack} onPress={() => setStep((step - 1) as Step)} disabled={submitting}>
                 <Ionicons name="arrow-back" size={18} color={colors.gray700} />
-                <Text style={styles.btnBackText}>Atrás</Text>
+                <Text style={styles.btnBackText}>Atras</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
             <View style={{ flex: 1 }} />
             {step < 3 ? (
               <TouchableOpacity
-                style={[styles.btnNext, !canAdvance() && styles.btnDisabled]}
-                onPress={() => canAdvance() && setStep((step + 1) as 2 | 3)}
-                disabled={!canAdvance()}
+                style={[styles.btnNext, !canAdvance && styles.btnDisabled]}
+                onPress={() => canAdvance && setStep((step + 1) as Step)}
+                disabled={!canAdvance}
                 activeOpacity={0.8}
               >
                 <Text style={styles.btnNextText}>Siguiente</Text>
                 <Ionicons name="arrow-forward" size={18} color={colors.black} />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={styles.btnCreate} onPress={handleCreate} activeOpacity={0.8}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.black} />
-                <Text style={styles.btnCreateText}>Crear cita</Text>
+              <TouchableOpacity
+                style={[styles.btnCreate, (!canAdvance || submitting) && styles.btnDisabled]}
+                onPress={() => void handleSubmit()}
+                disabled={!canAdvance || submitting}
+                activeOpacity={0.8}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color={colors.black} />
+                ) : (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.black} />
+                )}
+                <Text style={styles.btnCreateText}>{submitting ? 'Creando...' : 'Crear solicitud'}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -280,8 +494,8 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '90%',
-    maxWidth: 520,
-    maxHeight: '85%',
+    maxWidth: 560,
+    maxHeight: '88%',
     backgroundColor: colors.gray900,
     borderRadius: radii.lg,
     borderWidth: 1,
@@ -304,11 +518,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.gray800,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerIcon: {
     width: 36,
     height: 36,
@@ -317,23 +527,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    ...typography.h3,
-    color: colors.white,
-  },
+  headerTitle: { ...typography.h3, color: colors.white },
   steps: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,
-    gap: 0,
   },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   stepDot: {
     width: 24,
     height: 24,
@@ -342,47 +544,47 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  stepDotActive: {
-    backgroundColor: colors.gold,
+  stepDotActive: { backgroundColor: colors.gold },
+  stepNum: { fontSize: 11, fontWeight: '600', color: colors.gray400 },
+  stepNumActive: { color: colors.white },
+  stepLabel: { fontSize: 12, fontWeight: '500', color: colors.gray400, marginRight: spacing.xs },
+  stepLabelActive: { color: colors.gold, fontWeight: '600' },
+  stepLine: { width: 24, height: 2, backgroundColor: colors.gray800, marginHorizontal: spacing.xs },
+  stepLineActive: { backgroundColor: colors.gold },
+  body: { flex: 1 },
+  bodyContent: { padding: spacing.xl, gap: spacing.md },
+  sectionTitle: { ...typography.subtitle, color: colors.white, marginBottom: spacing.xs },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    borderRadius: radii.md,
   },
-  stepNum: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.gray400,
+  loadingText: { ...typography.bodySmall, color: colors.gray400 },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.error + '14',
+    borderWidth: 1,
+    borderColor: colors.error + '40',
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
-  stepNumActive: {
-    color: colors.white,
-  },
-  stepLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: colors.gray400,
-    marginRight: spacing.xs,
-  },
-  stepLabelActive: {
-    color: colors.gold,
-    fontWeight: '600',
-  },
-  stepLine: {
-    width: 24,
-    height: 2,
+  errorText: { ...typography.bodySmall, flex: 1, color: colors.error },
+  emptyText: { ...typography.bodySmall, color: colors.gray500, paddingVertical: spacing.sm },
+  searchInput: {
     backgroundColor: colors.gray800,
-    marginHorizontal: spacing.xs,
-  },
-  stepLineActive: {
-    backgroundColor: colors.gold,
-  },
-  body: {
-    flex: 1,
-  },
-  bodyContent: {
-    padding: spacing.xl,
-    gap: spacing.md,
-  },
-  sectionTitle: {
-    ...typography.subtitle,
+    borderWidth: 1,
+    borderColor: colors.gray700,
+    borderRadius: radii.md,
     color: colors.white,
-    marginBottom: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    fontSize: 15,
   },
   optionCard: {
     flexDirection: 'row',
@@ -393,10 +595,7 @@ const styles = StyleSheet.create({
     borderColor: colors.gray800,
     gap: spacing.md,
   },
-  optionCardSelected: {
-    borderColor: colors.gold,
-    backgroundColor: `${colors.gold}08`,
-  },
+  optionCardSelected: { borderColor: colors.gold, backgroundColor: `${colors.gold}08` },
   avatar: {
     width: 40,
     height: 40,
@@ -405,17 +604,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  avatarSelected: {
-    backgroundColor: colors.gold,
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.gray400,
-  },
-  avatarTextSelected: {
-    color: colors.white,
-  },
+  avatarSelected: { backgroundColor: colors.gold },
+  avatarText: { fontSize: 14, fontWeight: '600', color: colors.gray400 },
+  avatarTextSelected: { color: colors.white },
   serviceIcon: {
     width: 40,
     height: 40,
@@ -424,102 +615,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  serviceIconSelected: {
-    backgroundColor: colors.gold,
-  },
-  optionInfo: {
-    flex: 1,
-  },
-  optionName: {
-    ...typography.body,
-    fontWeight: '500',
-    color: colors.white,
-  },
-  optionNameSelected: {
-    color: colors.gold,
-    fontWeight: '600',
-  },
-  optionSub: {
-    ...typography.caption,
-    color: colors.gray500,
-    marginTop: 2,
-  },
+  serviceIconSelected: { backgroundColor: colors.gold },
+  optionInfo: { flex: 1 },
+  optionName: { ...typography.body, fontWeight: '500', color: colors.white },
+  optionNameSelected: { color: colors.gold, fontWeight: '600' },
+  optionSub: { ...typography.caption, color: colors.gray500, marginTop: 2 },
   summaryCard: {
     backgroundColor: colors.gray800,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.xxs,
-    marginBottom: spacing.sm,
   },
-  summaryLabel: {
-    ...typography.caption,
-    color: colors.gray500,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  summaryValue: {
-    ...typography.body,
-    fontWeight: '500',
-    color: colors.white,
-    marginBottom: spacing.xs,
-  },
-  fieldLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.gray400,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  manualTimeRow: {
-    flexDirection: 'row',
+  summaryLabel: { ...typography.caption, color: colors.gray500, textTransform: 'uppercase' },
+  summaryValue: { ...typography.body, fontWeight: '500', color: colors.white, marginBottom: spacing.xs },
+  weekNav: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  navBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.sm,
+    backgroundColor: colors.gray800,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.lg,
-    marginBottom: spacing.sm,
   },
-  timeInputGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  timeInput: {
-    width: 52,
-    height: 44,
-    borderWidth: 1.5,
+  weekLabel: { ...typography.bodySmall, flex: 1, color: colors.white, textAlign: 'center', fontWeight: '600' },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  dateChip: {
+    borderWidth: 1,
     borderColor: colors.gray800,
     borderRadius: radii.md,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.white,
-  },
-  timeSeparator: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.gray400,
-  },
-  periodToggle: {
-    flexDirection: 'row',
-    borderWidth: 1.5,
-    borderColor: colors.gray800,
-    borderRadius: radii.full,
-    overflow: 'hidden',
-  },
-  periodBtn: {
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.gray900,
+    backgroundColor: colors.gray800,
   },
-  periodBtnActive: {
-    backgroundColor: colors.gold,
+  dateChipActive: { backgroundColor: colors.gold, borderColor: colors.gold },
+  dateChipText: { ...typography.bodySmall, color: colors.white },
+  dateChipTextActive: { color: colors.black, fontWeight: '700' },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  slotBtn: {
+    minWidth: 82,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.gray700,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.gray800,
   },
-  periodText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.gray500,
-  },
-  periodTextActive: {
-    color: colors.black,
-  },
+  slotBtnActive: { backgroundColor: colors.gold, borderColor: colors.gold },
+  slotText: { ...typography.bodySmall, color: colors.white, fontWeight: '600' },
+  slotTextActive: { color: colors.black },
+  fieldLabel: { ...typography.bodySmall, fontWeight: '600', color: colors.gray400, marginTop: spacing.sm },
   textInput: {
     borderWidth: 1.5,
     borderColor: colors.gray800,
@@ -527,9 +672,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     ...typography.body,
     color: colors.white,
-    minHeight: 80,
-    textAlignVertical: 'top',
   },
+  textArea: { minHeight: 80, textAlignVertical: 'top' },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -545,10 +689,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
   },
-  btnBackText: {
-    ...typography.buttonSmall,
-    color: colors.gray400,
-  },
+  btnBackText: { ...typography.buttonSmall, color: colors.gray400 },
   btnNext: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -558,13 +699,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     borderRadius: radii.full,
   },
-  btnDisabled: {
-    opacity: 0.4,
-  },
-  btnNextText: {
-    ...typography.buttonSmall,
-    color: colors.black,
-  },
+  btnNextText: { ...typography.buttonSmall, color: colors.black },
   btnCreate: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -574,8 +709,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     borderRadius: radii.full,
   },
-  btnCreateText: {
-    ...typography.button,
-    color: colors.black,
-  },
+  btnCreateText: { ...typography.button, color: colors.black },
+  btnDisabled: { opacity: 0.4 },
 });

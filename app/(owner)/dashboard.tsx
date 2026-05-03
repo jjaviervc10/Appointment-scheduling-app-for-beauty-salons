@@ -13,9 +13,10 @@ import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
 import { IncidentModal } from '../../src/components/modals/IncidentModal';
 import { RescheduleModal, type RescheduleSimulationResult } from '../../src/components/modals/RescheduleModal';
 import { KPIFilterModal } from '../../src/components/modals/KPIFilterModal';
-import { MOCK_TIME_BLOCKS } from '../../src/services/mock-data';
 import type { AppointmentViewModel } from '../../src/types/models';
+import type { TimeBlock } from '../../src/types/database';
 import { fetchAppointmentsByDate, fetchPendingAppointments, updateAppointmentStatus } from '../../src/services/appointments';
+import { fetchTimeBlocks } from '../../src/services/availability';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
 
@@ -68,6 +69,7 @@ export default function DashboardScreen() {
   const [kpiFilter, setKpiFilter] = useState<KPIKey | null>(null);
   const [todayAppts, setTodayAppts] = useState<AppointmentViewModel[]>([]);
   const [pending, setPending] = useState<AppointmentViewModel[]>([]);
+  const [todayBlocks, setTodayBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackMessage | null>(null);
@@ -89,23 +91,27 @@ export default function DashboardScreen() {
       endpoints: [
         'GET /api/owner/appointments/pending',
         'GET /api/owner/appointments/today',
+        'GET /api/owner/time-blocks',
       ],
       todayStr,
       silent: opts?.silent ?? false,
     });
 
     try {
-      const [pendingData, todayData] = await Promise.all([
+      const [pendingData, todayData, blocksData] = await Promise.all([
         fetchPendingAppointments(),
         fetchAppointmentsByDate(todayStr),
+        fetchTimeBlocks(todayStr),
       ]);
       setPending(pendingData);
       setTodayAppts(todayData);
+      setTodayBlocks(blocksData);
     } catch (error) {
       logDashboardActionError('load_dashboard_data', error, {
         endpoints: [
           'GET /api/owner/appointments/pending',
           'GET /api/owner/appointments/today',
+          'GET /api/owner/time-blocks',
         ],
         todayStr,
       });
@@ -118,6 +124,7 @@ export default function DashboardScreen() {
         });
         setPending([]);
         setTodayAppts([]);
+        setTodayBlocks([]);
       }
     } finally {
       if (!opts?.silent) {
@@ -147,10 +154,6 @@ export default function DashboardScreen() {
   const confirmedCount = useMemo(
     () => todayAppts.filter(a => a.status === 'client_confirmed' || a.status === 'confirmed_by_owner').length,
     [todayAppts]
-  );
-  const todayBlocks = useMemo(
-    () => MOCK_TIME_BLOCKS.filter(b => b.date === todayStr),
-    [todayStr]
   );
   const totalMinutes = todayAppts.reduce((s, a) => s + a.durationMinutes, 0);
   const occupation = Math.min(100, Math.round((totalMinutes / (9 * 60)) * 100));
@@ -460,8 +463,18 @@ export default function DashboardScreen() {
         onNewIncident={() => setShowIncident(true)}
       />
 
-      <NewAppointmentModal visible={showNewAppt} onClose={() => setShowNewAppt(false)} />
-      <BlockTimeModal visible={showBlockTime} onClose={() => setShowBlockTime(false)} />
+      <NewAppointmentModal
+        visible={showNewAppt}
+        onClose={() => setShowNewAppt(false)}
+        onCreated={() => void loadDashboardData({ silent: true })}
+      />
+      <BlockTimeModal
+        visible={showBlockTime}
+        onClose={() => {
+          setShowBlockTime(false);
+          void loadDashboardData({ silent: true });
+        }}
+      />
       <IncidentModal visible={showIncident} onClose={() => setShowIncident(false)} />
       <RescheduleModal
         visible={!!rescheduleId}

@@ -7,9 +7,14 @@ import type {
   OwnerClientDetailResponse,
   OwnerClientRow,
   OwnerClientsResponse,
+  OwnerServiceRow,
+  OwnerServicesResponse,
+  OwnerTimeBlockRow,
+  OwnerTimeBlocksResponse,
   OwnerWeeklyAvailabilityResponse,
   OwnerWeeklyAvailabilityRow,
   OwnerWeeklyAvailabilityUpdateInput,
+  OwnerWeeklyAvailabilityDeleteResponse,
 } from '../types/api';
 import type {
   OwnerMessagesParams,
@@ -82,6 +87,36 @@ export async function getOwnerClientDetail(id: string): Promise<OwnerClientDetai
   });
 }
 
+export async function getOwnerServices(params: { active?: boolean } = {}): Promise<OwnerServiceRow[]> {
+  const query = new URLSearchParams();
+  if (params.active !== undefined) {
+    query.set('active', String(params.active));
+  }
+
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const response = await apiRequest<OwnerServicesResponse>(`/api/owner/services${suffix}`, {
+    requiresOwnerAuth: true,
+  });
+
+  return response.data;
+}
+
+export async function getOwnerTimeBlocks(params: {
+  startDate: string;
+  endDate: string;
+}): Promise<OwnerTimeBlockRow[]> {
+  const query = new URLSearchParams({
+    startDate: params.startDate,
+    endDate: params.endDate,
+  });
+
+  const response = await apiRequest<OwnerTimeBlocksResponse>(`/api/owner/time-blocks?${query.toString()}`, {
+    requiresOwnerAuth: true,
+  });
+
+  return response.data;
+}
+
 export async function getOwnerMessages(params: OwnerMessagesParams = {}): Promise<OwnerMessagesResponse> {
   const query = new URLSearchParams();
 
@@ -117,22 +152,44 @@ export async function retryOwnerMessage(id: string): Promise<RetryOwnerMessageRe
   return response.message;
 }
 
-export async function getOwnerWeeklyAvailability(): Promise<OwnerWeeklyAvailabilityRow[]> {
-  const response = await apiRequest<OwnerWeeklyAvailabilityResponse>('/api/owner/weekly-availability', {
-    requiresOwnerAuth: true,
-  });
-  return response.availability;
+export async function getOwnerWeeklyAvailability(
+  weekStartDate?: string
+): Promise<{ rows: OwnerWeeklyAvailabilityRow[]; hasOverrides: boolean; weekStartDate?: string }> {
+  const suffix = weekStartDate ? `?week_start_date=${encodeURIComponent(weekStartDate)}` : '';
+  const response = await apiRequest<OwnerWeeklyAvailabilityResponse>(
+    `/api/owner/weekly-availability${suffix}`,
+    { requiresOwnerAuth: true }
+  );
+  return {
+    rows: response.availability,
+    hasOverrides: response.hasOverrides ?? false,
+    weekStartDate: response.week_start_date,
+  };
 }
 
 export async function updateOwnerWeeklyAvailability(
-  payload: OwnerWeeklyAvailabilityUpdateInput
-): Promise<OwnerWeeklyAvailabilityRow[]> {
-  const response = await apiRequest<OwnerWeeklyAvailabilityResponse>('/api/owner/weekly-availability', {
-    method: 'PUT',
-    body: payload,
-    requiresOwnerAuth: true,
-  });
-  return response.availability;
+  payload: OwnerWeeklyAvailabilityUpdateInput,
+  weekStartDate?: string
+): Promise<{ rows: OwnerWeeklyAvailabilityRow[]; hasOverrides: boolean }> {
+  const suffix = weekStartDate ? `?week_start_date=${encodeURIComponent(weekStartDate)}` : '';
+  const response = await apiRequest<OwnerWeeklyAvailabilityResponse>(
+    `/api/owner/weekly-availability${suffix}`,
+    { method: 'PUT', body: payload, requiresOwnerAuth: true }
+  );
+  return { rows: response.availability, hasOverrides: response.hasOverrides ?? false };
+}
+
+export async function deleteWeekOverride(
+  weekStartDate: string,
+  dayOfWeek?: number
+): Promise<number> {
+  const params = new URLSearchParams({ week_start_date: weekStartDate });
+  if (dayOfWeek !== undefined) params.set('day_of_week', String(dayOfWeek));
+  const response = await apiRequest<OwnerWeeklyAvailabilityDeleteResponse>(
+    `/api/owner/weekly-availability?${params.toString()}`,
+    { method: 'DELETE', requiresOwnerAuth: true }
+  );
+  return response.deletedCount;
 }
 
 export async function approveOwnerAppointment(id: string): Promise<OwnerAppointmentMutationResult> {

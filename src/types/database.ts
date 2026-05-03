@@ -68,6 +68,8 @@ export interface WeeklyAvailability {
   start_time: string; // HH:mm
   end_time: string;   // HH:mm
   is_active: boolean;
+  is_override: boolean;   // true si este día usa un override semanal, no el template base
+  override_id: string | null;
   created_at: string;
 }
 
