@@ -43,7 +43,7 @@ La mini app:
 
 - Lee query params opcionales: `token`, `phone`, `fullName`.
 - Prellena `phone` y `fullName` si vienen en URL.
-- Usa una experiencia guiada de 3 pasos: datos, servicio, dia/horario.
+- Usa una experiencia guiada de 4 pasos: datos, servicio, dia/horario, confirmar.
 - Carga servicios reales con `GET /api/public/services`.
 - Carga disponibilidad real con `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`.
 - Muestra los proximos 7 dias sin calendario complejo.
@@ -54,36 +54,50 @@ La mini app:
 	- `phone`
 	- `serviceId`
 	- `startAt` (usa `slotStartAt` devuelto por backend como fuente de verdad)
+	- `notes` opcional
 	- `token` opcional
 
 En mini app no hay fallback mock silencioso cuando falla backend:
 
 - Se muestra error visible al usuario.
 - Se bloquea envio hasta resolver datos requeridos.
-- Se muestra siempre un resumen con servicio, fecha/hora y estado de solicitud.
+- Muestra progreso visible `1 / 4`, `2 / 4`, `3 / 4`, `4 / 4`.
+- Usa botones grandes y una sola accion principal por paso.
 
 #### Flujo visual de pasos
 
-1. **Datos**
+1. **Tus datos**
+	- Logo del negocio.
 	- Titulo visible: `Agenda tu cita`.
-	- Campos: `Nombre`, `Celular`.
+	- Subtitulo: `Es rapido y facil`.
+	- Campos: `Nombre completo`, `Celular`.
 	- Si el link trae `phone` o `fullName`, se prellenan.
 	- Accion principal: `Continuar`.
 2. **Servicio**
+	- Titulo: `Elige un servicio`.
 	- Lista tarjetas grandes con servicios reales.
+	- Muestra nombre, duracion y descripcion cuando existe.
+	- Servicio seleccionado con color destacado.
 	- Accion principal: `Continuar`.
 3. **Dia y horario**
+	- Titulo: `Elige dia y horario`.
 	- Muestra los proximos 7 dias.
 	- Al elegir dia, consulta disponibilidad real de la semana correspondiente.
 	- Muestra slots reales de ese dia.
-	- Si no hay slots: `No hay horarios disponibles ese dia.`
+	- Si no hay slots: `No hay horarios disponibles este dia.`
+	- Accion principal: `Continuar`.
+4. **Confirmar**
+	- Titulo: `Confirma tu cita`.
+	- Muestra resumen visual: nombre, celular, servicio, dia y hora.
+	- Permite agregar notas opcionales.
 	- Accion principal: `Enviar solicitud`.
-4. **Exito**
+5. **Exito**
 	- Redirige a `/miniapp/success`.
 	- Muestra:
 		- `Solicitud enviada`
 		- `Tu cita queda pendiente de aprobacion`
 		- `Te avisaremos por WhatsApp cuando sea aprobada`
+		- Boton `Entendido`
 
 ## 4) Ejemplos de links
 
@@ -138,6 +152,16 @@ Tambien se muestra error visible cuando falla la carga de servicios o disponibil
 - En Android emulador, puede requerirse `http://10.0.2.2:3000`.
 - Si falta `EXPO_PUBLIC_OWNER_SECRET`, solo impacta endpoints owner; mini app publica no lo requiere.
 - Para probar la mini app en web, usar un puerto permitido por CORS de Railway, por ejemplo `8081`, `8082`, `3000` o `19006`.
+
+Ejemplo de prueba local:
+
+```bash
+npx expo start --web --port 8081
+```
+
+URL local:
+
+`http://localhost:8081/miniapp/booking?phone=%2B526141234567&fullName=Ana`
 
 ## 8) Fase MVP conectada
 

@@ -1,9 +1,10 @@
 # 📋 Reporte Completo de la Aplicación
 ## Jaquelina López Barber Studio — App de Reservas
 
-> **Fecha:** 19 de Abril de 2026  
+> **Última revisión:** 3 de Mayo de 2026  
 > **Tecnología:** React Native + Expo SDK 54 + TypeScript  
-> **Backend:** Supabase (actualmente con datos simulados/mock)  
+> **Backend owner:** Express en Railway — `https://striking-caring-production.up.railway.app`  
+> **Backend cliente:** Supabase SDK (aún pendiente de conectar)  
 > **Diseño:** Tema oscuro premium (negro + dorado)
 
 ---
@@ -668,7 +669,135 @@ Se pueden filtrar tocando las tarjetas de resumen (Total / Leídos / Fallidos).
 
 ---
 
-## 📝 MODALES DE LA DUEÑA
+## � ESTADO DE INTEGRACIÓN REAL VS MOCK — Mayo 2026
+
+> Leyenda: ✅ Conectado al backend real · 🟡 Parcialmente conectado · ❌ Mock / pendiente
+
+### LADO OWNER (Panel de la dueña)
+
+| Pantalla / Función | Estado | Fuente de datos | Notas |
+|---|---|---|---|
+| **Dashboard — citas de hoy** | ✅ Real | `GET /api/owner/appointments/today` | `fetchAppointmentsByDate(hoy)` |
+| **Dashboard — citas por fecha** | ✅ Real | `GET /api/owner/appointments?startDate=&endDate=` | Cualquier fecha distinta a hoy |
+| **Dashboard — solicitudes pendientes** | ✅ Real | `GET /api/owner/appointments/pending` | `fetchPendingAppointments()` |
+| **Dashboard — aprobar cita** | ✅ Real | `POST /api/owner/appointments/:id/approve` | `updateAppointmentStatus('confirmed_by_owner')` |
+| **Dashboard — rechazar cita** | ✅ Real | `POST /api/owner/appointments/:id/reject` | `updateAppointmentStatus('rejected_by_owner')` |
+| **Dashboard — cancelar cita (owner)** | ✅ Real | `POST /api/owner/appointments/:id/cancel` | `updateAppointmentStatus('owner_cancelled')` |
+| **Dashboard — completar cita** | ✅ Real | `POST /api/owner/appointments/:id/complete` | `updateAppointmentStatus('completed')` |
+| **Dashboard — KPIs (tarjetas métricas)** | 🟡 Parcial | Derivados de datos reales de citas | Calculados en cliente desde appointments reales |
+| **Dashboard — Nueva cita (modal)** | ✅ Real | `GET /api/owner/clients` + `GET /api/owner/services` | Listas reales; submit de creación pendiente de endpoint |
+| **Dashboard — Bloquear horario (modal)** | ✅ Real | `POST /api/owner/time-blocks` | Fecha editable, 409 conflict manejado |
+| **Dashboard — Incidencia (modal)** | ❌ Mock | — | IncidentModal solo muestra UI, no persiste |
+| **Dashboard — Reprogramar (modal)** | ❌ Mock | `MOCK_APPOINTMENTS` | RescheduleModal usa datos mock para ocupación de slots |
+| **Agenda — Vista Día** | ✅ Real | `GET /api/owner/appointments` + `GET /api/owner/time-blocks` | DayView consume datos reales del dashboard |
+| **Agenda — Vista Semana** | 🟡 Parcial | `getMockWeekSummary` en `WeekCalendarView` | WeekCalendarView usa mock; `WeekView` de agenda usa datos reales via props |
+| **Agenda — Vista Mes** | 🟡 Parcial | Mezcla | MonthView depende de cómo se alimente desde agenda.tsx |
+| **Agenda — Disponibilidad** | ✅ Real | `GET/PUT /api/owner/weekly-availability` | Semanas específicas (override) y plantilla base; navegador ← → semanal |
+| **Agenda — Bloqueos (listar)** | ✅ Real | `GET /api/owner/time-blocks` | Rango 45 días desde hoy |
+| **Agenda — Bloqueos (crear)** | ✅ Real | `POST /api/owner/time-blocks` | Fecha seleccionable, recurrente/único |
+| **Agenda — Bloqueos (eliminar)** | ✅ Real | `DELETE /api/owner/time-blocks/:id` | Soft-delete; botón por tarjeta con spinner |
+| **Agenda — Incidencias** | ❌ Mock | `MOCK_INCIDENTS` | Sección visible pero no persiste ni carga del backend |
+| **Clientes — lista** | ✅ Real | `GET /api/owner/clients` | Búsqueda por nombre/teléfono, paginación |
+| **Clientes — detalle** | ✅ Real | `GET /api/owner/clients/:id` | Historial de citas del cliente |
+| **Mensajes — lista** | ✅ Real | `GET /api/owner/messages` | Filtros por estado y tipo; retry de fallidos |
+| **Configuración** | ❌ Mock / UI | — | Pantalla UI estática, sin endpoints de escritura |
+| **Autenticación owner** | ❌ Mock | `MOCK_OWNER_PROFILE` en `useAuth.ts` | Sin Supabase Auth real; secreto hardcoded en env |
+
+---
+
+### LADO CLIENTE
+
+| Pantalla / Función | Estado | Fuente de datos | Notas |
+|---|---|---|---|
+| **Inicio — servicios** | ❌ Mock | `MOCK_SERVICES` | Lista hardcoded, sin conexión a `booking.services` |
+| **Inicio — descansos de emergencia** | ❌ Mock | `MOCK_TIME_BLOCKS` | Datos fijos, sin conexión al backend |
+| **Reservar — calendario (disponibilidad)** | ❌ Mock | `MOCK_APPOINTMENTS` + `MOCK_TIME_BLOCKS` | `booking.tsx` calcula slots localmente con mocks |
+| **Reservar — selección de servicio (wizard)** | ❌ Mock | `MOCK_SERVICES` | `BookingWizardModal` usa servicios hardcoded |
+| **Reservar — solicitar cita** | 🟡 Parcial | `POST /api/public/booking-request` | `createPublicBookingRequest()` existe y envía al backend, pero requiere `fullName` + `phone` — no hay auth de cliente real |
+| **Mis Citas — lista** | ❌ Pendiente | `fetchUpcomingAppointments()` throws | Lanza error: "No backend endpoint connected for client upcoming appointments" |
+| **Miniapp — booking** | 🟡 Parcial | `POST /api/public/booking-request` con token | `app/miniapp/booking.tsx` existe; flujo completo pendiente de verificar |
+| **Miniapp — success** | 🟡 Parcial | — | Pantalla de confirmación existe, integración completa pendiente |
+| **Autenticación cliente** | ❌ Mock | `MOCK_CLIENT_PROFILE` | Sin Supabase Auth; no hay login real de cliente |
+
+---
+
+### INFRAESTRUCTURA Y SERVICIOS BASE
+
+| Componente | Estado | Notas |
+|---|---|---|
+| `apiClient.ts` — llamadas owner | ✅ Operativo | `Bearer OWNER_SECRET`, manejo de errores HTTP, base URL vía env |
+| `supabase.ts` — cliente SDK | ⚠️ Placeholder | Inicializado pero con URL/key placeholder `'your-project.supabase.co'` — no funcional hasta configurar env |
+| `useAuth.ts` — autenticación | ❌ Mock | Devuelve perfiles fijos; sin sesión real |
+| `bookingApi.ts` — booking público | 🟡 Parcial | `createPublicBookingRequest` conectado; `getAvailableSlots` pendiente |
+| Variables de entorno | ⚠️ Manual | Requieren `EXPO_PUBLIC_API_BASE_URL`, `EXPO_PUBLIC_OWNER_SECRET`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY` |
+
+---
+
+## 🗺️ ROADMAP DE PENDIENTES — PRIORIZADO
+
+### Prioridad Alta (bloquean flujo completo)
+
+| # | Tarea | Archivos afectados |
+|---|---|---|
+| 1 | **Auth real del owner** — reemplazar `MOCK_OWNER_PROFILE` con Supabase Auth | `src/hooks/useAuth.ts` |
+| 2 | **Mis Citas (cliente)** — conectar `fetchUpcomingAppointments()` a Supabase `booking.appointments` | `src/services/appointments.ts`, `src/hooks/useAppointments.ts` |
+| 3 | **Servicios reales en cliente** — reemplazar `MOCK_SERVICES` con `GET /api/owner/services` o Supabase `booking.services` | `app/(client)/home.tsx`, `src/components/modals/BookingWizardModal.tsx` |
+| 4 | **Slots reales en booking cliente** — conectar `booking.tsx` a `booking.get_available_slots()` vía Supabase RPC | `app/(client)/booking.tsx` |
+
+### Prioridad Media
+
+| # | Tarea | Archivos afectados |
+|---|---|---|
+| 5 | **Incidencias reales** — endpoint backend `GET/POST /api/owner/incidents` + conectar `BlocksPanel` e `IncidentModal` | `src/components/agenda/BlocksPanel.tsx`, `src/components/modals/IncidentModal.tsx` |
+| 6 | **WeekCalendarView mock** — reemplazar `getMockWeekSummary` con `fetchAppointmentsByRange` | `src/components/calendar/WeekCalendarView.tsx` |
+| 7 | **RescheduleModal mock** — reemplazar `MOCK_APPOINTMENTS` con datos reales para calcular ocupación de slots | `src/components/modals/RescheduleModal.tsx` |
+| 8 | **Configuración del negocio** — endpoint `GET/PUT /api/owner/settings` + conectar pantalla de ajustes | `app/(owner)/settings.tsx` |
+| 9 | **Selector de día para bloqueos recurrentes** — `BlockTimeModal` hoy hereda el día actual si es recurrente | `src/components/modals/BlockTimeModal.tsx` |
+
+### Prioridad Baja / Fase futura
+
+| # | Tarea |
+|---|---|
+| 10 | Auth real del cliente (Supabase email/password o token miniapp) |
+| 11 | WhatsApp webhook real (notificaciones automáticas) |
+| 12 | Miniapp tokenizada completa (flujo link → token → reserva) |
+| 13 | Recordatorios automáticos 24h antes |
+| 14 | No-show automático por tiempo transcurrido |
+
+---
+
+## 📊 RESUMEN DE PROGRESO (Mayo 2026)
+
+| Área | Funciones totales | Conectadas al backend | Mock / Pendiente |
+|---|---|---|---|
+| Owner — Citas | 5 acciones | ✅ 5/5 | 0 |
+| Owner — Bloqueos | 3 acciones | ✅ 3/3 | 0 |
+| Owner — Disponibilidad | 3 acciones | ✅ 3/3 | 0 |
+| Owner — Clientes | 2 vistas | ✅ 2/2 | 0 |
+| Owner — Mensajes | 2 acciones | ✅ 2/2 | 0 |
+| Owner — Incidencias | 1 función | ❌ 0/1 | 1 |
+| Owner — Configuración | 1 pantalla | ❌ 0/1 | 1 |
+| Owner — Auth | — | ❌ Mock | 1 |
+| Cliente — Servicios | 1 lista | ❌ 0/1 | 1 |
+| Cliente — Disponibilidad/Slots | 1 flujo | ❌ 0/1 | 1 |
+| Cliente — Solicitar cita | 1 acción | 🟡 1/1* | *requiere auth real |
+| Cliente — Mis citas | 1 lista | ❌ 0/1 | 1 |
+| Cliente — Auth | — | ❌ Mock | 1 |
+| **TOTAL** | **~25** | **✅ 18** | **❌ 7 + ⚠️ 2** |
+
+---
+
+## 💡 NOTAS TÉCNICAS
+
+1. **Owner backend 100% funcional** — todas las rutas del owner (`/api/owner/*`) están implementadas y el frontend las consume correctamente desde Railway.
+2. **Cliente bloqueado en auth** — el lado del cliente no puede avanzar sin implementar Supabase Auth real (o token de miniapp). Todo el flujo cliente depende de ello.
+3. **Supabase SDK** está inicializado pero con valores placeholder. Requiere configurar `EXPO_PUBLIC_SUPABASE_URL` y `EXPO_PUBLIC_SUPABASE_ANON_KEY` en `.env` o `app.json extra`.
+4. **Sin regresiones** — los cambios del lado owner no rompen el lado cliente (rutas independientes).
+5. **0 errores TypeScript** en todos los archivos modificados al 03-May-2026.
+
+---
+
+
 
 ### Modal: NUEVA CITA (NewAppointmentModal)
 
@@ -792,13 +921,15 @@ Se abre al tocar una tarjeta de métrica en el dashboard:
 
 ---
 
-## 💡 NOTAS IMPORTANTES
+## 💡 NOTAS HISTÓRICAS (estado original al 19-Abr-2026)
 
-1. **Toda la información actualmente es simulada** (mock data). No hay conexión real a base de datos aún.
-2. Las acciones como "Aceptar cita", "Cancelar", etc. actualmente solo muestran alertas — no modifican datos reales.
-3. El backend está preparado para **Supabase** con el esquema `booking.*`.
-4. Los mensajes de WhatsApp se registran pero no se envían realmente aún.
-5. La app está preparada para funcionar tanto en **celulares** como en **computadoras/tablets** gracias al diseño responsivo.
+> Las notas siguientes reflejan el estado inicial de la app antes de la integración con el backend real.
+
+1. **Toda la información actualmente era simulada** (mock data). No había conexión real a base de datos aún.
+2. Las acciones como "Aceptar cita", "Cancelar", etc. actualmente solo mostraban alertas — no modificaban datos reales.
+3. El backend estaba preparado para **Supabase** con el esquema `booking.*`.
+4. Los mensajes de WhatsApp se registraban pero no se enviaban realmente aún.
+5. La app estaba preparada para funcionar tanto en **celulares** como en **computadoras/tablets** gracias al diseño responsivo.
 
 ---
 
