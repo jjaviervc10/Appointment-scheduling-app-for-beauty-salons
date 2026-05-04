@@ -43,27 +43,57 @@ La mini app:
 
 - Lee query params opcionales: `token`, `phone`, `fullName`.
 - Prellena `phone` y `fullName` si vienen en URL.
+- Usa una experiencia guiada de 3 pasos: datos, servicio, dia/horario.
 - Carga servicios reales con `GET /api/public/services`.
 - Carga disponibilidad real con `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`.
-- Permite completar nombre, celular, servicio, dia/horario y notas usando datos reales.
+- Muestra los proximos 7 dias sin calendario complejo.
+- Filtra los slots del dia elegido usando `slotStartAt` del backend.
+- Permite completar nombre, celular, servicio, dia/horario usando datos reales.
 - Envia solicitud a `POST /api/public-booking/request` con:
 	- `fullName`
 	- `phone`
 	- `serviceId`
 	- `startAt` (usa `slotStartAt` devuelto por backend como fuente de verdad)
-	- `notes` opcional
 	- `token` opcional
 
 En mini app no hay fallback mock silencioso cuando falla backend:
 
 - Se muestra error visible al usuario.
 - Se bloquea envio hasta resolver datos requeridos.
+- Se muestra siempre un resumen con servicio, fecha/hora y estado de solicitud.
+
+#### Flujo visual de pasos
+
+1. **Datos**
+	- Titulo visible: `Agenda tu cita`.
+	- Campos: `Nombre`, `Celular`.
+	- Si el link trae `phone` o `fullName`, se prellenan.
+	- Accion principal: `Continuar`.
+2. **Servicio**
+	- Lista tarjetas grandes con servicios reales.
+	- Accion principal: `Continuar`.
+3. **Dia y horario**
+	- Muestra los proximos 7 dias.
+	- Al elegir dia, consulta disponibilidad real de la semana correspondiente.
+	- Muestra slots reales de ese dia.
+	- Si no hay slots: `No hay horarios disponibles ese dia.`
+	- Accion principal: `Enviar solicitud`.
+4. **Exito**
+	- Redirige a `/miniapp/success`.
+	- Muestra:
+		- `Solicitud enviada`
+		- `Tu cita queda pendiente de aprobacion`
+		- `Te avisaremos por WhatsApp cuando sea aprobada`
 
 ## 4) Ejemplos de links
 
 Ejemplo local completo:
 
 `http://localhost:8081/miniapp/booking?token=abc123&phone=%2B526141234567&fullName=Juan%20Perez`
+
+Ejemplo esperado desde WhatsApp:
+
+`/miniapp/booking?phone=%2B526141234567&fullName=Ana`
 
 Mini app con token:
 
@@ -79,27 +109,37 @@ Mini app con token, telefono y nombre:
 
 Ejemplos futuros desde WhatsApp:
 
-`https://tu-dominio.com/miniapp/booking?token=TOKEN_TEMPORAL`
+`https://barberjaquelinalopezstudio.netlify.app/miniapp/booking?phone=%2B526141234567&fullName=Ana`
 
-`https://tu-dominio.com/miniapp/booking?token=TOKEN&phone=%2B526141234567`
+`https://barberjaquelinalopezstudio.netlify.app/miniapp/booking?token=TOKEN&phone=%2B526141234567`
 
 ## 5) Manejo de errores mini app
 
 En mini app, el submit mapea estados comunes:
 
-- `400`: datos invalidos
-- `404`: servicio no encontrado
-- `409`: horario no disponible
-- `429`: demasiados intentos
-- `500`: error inesperado
+- `400`: `Revisa tus datos`
+- `404`: `El servicio ya no esta disponible`
+- `409`: `Ese horario ya fue ocupado. Elige otro`
+- `429`: `Demasiados intentos. Intenta mas tarde`
+- `500`: `Ocurrio un error. Intenta mas tarde`
 
-## 6) Notas de entorno local
+Tambien se muestra error visible cuando falla la carga de servicios o disponibilidad.
+
+## 6) Timezone y slots
+
+- El frontend no construye horarios manualmente.
+- El frontend usa `slotStartAt` devuelto por `GET /api/public/availability` como valor de `startAt`.
+- Para mostrar hora al usuario se formatea con locale `es-MX` y zona `America/Mexico_City`.
+- No se debe mostrar `requestedStartAt` como hora visible porque incluye buffers del servicio.
+
+## 7) Notas de entorno local
 
 - Web y iOS simulador suelen aceptar `http://localhost:3000`.
 - En Android emulador, puede requerirse `http://10.0.2.2:3000`.
 - Si falta `EXPO_PUBLIC_OWNER_SECRET`, solo impacta endpoints owner; mini app publica no lo requiere.
+- Para probar la mini app en web, usar un puerto permitido por CORS de Railway, por ejemplo `8081`, `8082`, `3000` o `19006`.
 
-## 7) Fase MVP conectada
+## 8) Fase MVP conectada
 
 - `GET /api/public/services`
 - `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`

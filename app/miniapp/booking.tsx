@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
   ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { colors, spacing, typography, radii } from '../../src/theme';
+import { colors, radii, spacing, typography } from '../../src/theme';
 import {
   createPublicBookingRequest,
   getPublicAvailability,
@@ -20,161 +20,182 @@ import type { PublicAvailabilitySlot, PublicService } from '../../src/types/api'
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey, getIsoDateKey } from '../../src/utils/date';
 
+type Step = 'details' | 'service' | 'schedule';
+
 function firstParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] ?? '';
   return value ?? '';
 }
 
-function fmt(d: Date): string {
-  return formatLocalDateKey(d);
+function dateKey(date: Date): string {
+  return formatLocalDateKey(date);
 }
 
-function getWeekStart(dateInput: string): string {
-  const date = new Date(`${dateInput}T12:00:00`);
+function getWeekStart(dayKey: string): string {
+  const date = new Date(`${dayKey}T12:00:00`);
   const day = date.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   date.setDate(date.getDate() + diff);
-  return fmt(date);
+  return dateKey(date);
 }
 
-function formatHour(isoDateTime: string): string {
-  const date = new Date(isoDateTime);
-  return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+function formatDayLabel(dayKey: string): string {
+  const date = new Date(`${dayKey}T12:00:00`);
+  return date.toLocaleDateString('es-MX', {
+    timeZone: 'America/Mexico_City',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+function formatTimeLabel(isoDateTime: string): string {
+  return new Date(isoDateTime).toLocaleTimeString('es-MX', {
+    timeZone: 'America/Mexico_City',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function mapErrorMessage(status: number): string {
-  if (status === 400) return 'Revisa nombre, celular y horario seleccionado.';
-  if (status === 404) return 'Servicio no encontrado. Actualiza la mini app.';
-  if (status === 409) return 'Ese horario ya no esta disponible. Elige otro.';
-  if (status === 413) return 'Las notas son demasiado largas. Reduce el texto.';
-  if (status === 422) return 'La cita debe solicitarse con al menos 30 minutos de anticipacion.';
-  if (status === 429) return 'Demasiados intentos. Intenta en unos minutos.';
-  if (status === 500) return 'Error inesperado. Intenta nuevamente.';
-  return 'No se pudo enviar la solicitud.';
+  if (status === 400 || status === 422) return 'Revisa tus datos';
+  if (status === 404) return 'El servicio ya no está disponible';
+  if (status === 409) return 'Ese horario ya fue ocupado. Elige otro';
+  if (status === 429) return 'Demasiados intentos. Intenta más tarde';
+  if (status === 500) return 'Ocurrió un error. Intenta más tarde';
+  return 'No se pudo completar. Intenta otra vez';
+}
+
+function getNextSevenDays(): string[] {
+  const today = new Date();
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + index);
+    return dateKey(date);
+  });
 }
 
 export default function MiniAppBookingScreen() {
-  const params = useLocalSearchParams<{ token?: string | string[]; phone?: string | string[]; fullName?: string | string[] }>();
   const router = useRouter();
-  const today = fmt(new Date());
+  const params = useLocalSearchParams<{
+    fullName?: string | string[];
+    phone?: string | string[];
+    token?: string | string[];
+  }>();
 
   const token = firstParam(params.token).trim();
+  const dayOptions = useMemo(() => getNextSevenDays(), []);
+
+  const [step, setStep] = useState<Step>('details');
   const [fullName, setFullName] = useState(firstParam(params.fullName));
   const [phone, setPhone] = useState(firstParam(params.phone));
   const [services, setServices] = useState<PublicService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
-  const [serviceId, setServiceId] = useState('');
+  const [selectedServiceId, setSelectedServiceId] = useState('');
+  const [selectedDate, setSelectedDate] = useState(dayOptions[0] ?? dateKey(new Date()));
   const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
-  const [notes, setNotes] = useState('');
-  const [selectedDate, setSelectedDate] = useState(today);
   const [selectedSlotStartAt, setSelectedSlotStartAt] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const selectedService = useMemo(
+    () => services.find((service) => service.id === selectedServiceId) ?? null,
+    [services, selectedServiceId],
+  );
+
+  const selectedSlot = useMemo(
+    () => availabilitySlots.find((slot) => slot.slotStartAt === selectedSlotStartAt) ?? null,
+    [availabilitySlots, selectedSlotStartAt],
+  );
+
+  const visibleSlots = useMemo(
+    () =>
+      availabilitySlots
+        .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
+        .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime()),
+    [availabilitySlots, selectedDate],
+  );
+
+  const requestStatus = useMemo(() => {
+    if (isSubmitting) return 'Enviando solicitud';
+    if (submitError) return 'Revisa el aviso';
+    if (selectedSlotStartAt) return 'Lista para enviar';
+    return 'Pendiente por enviar';
+  }, [isSubmitting, selectedSlotStartAt, submitError]);
 
   const loadServices = useCallback(async () => {
-    setServicesLoading(true);
-    setServicesError(null);
-
     try {
+      setServicesLoading(true);
+      setServicesError(null);
       const response = await getPublicServices();
       setServices(response);
-      if (response.length > 0) {
-        setServiceId((prev) => prev || response[0].id);
-      }
     } catch (error) {
-      if (isHttpError(error)) {
-        setServicesError(mapErrorMessage(error.status));
-      } else {
-        setServicesError('No se pudo cargar servicios. Intenta nuevamente.');
-      }
+      setServices([]);
+      setServicesError(isHttpError(error) ? mapErrorMessage(error.status) : 'Ocurrió un error. Intenta más tarde');
     } finally {
       setServicesLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void loadServices();
-  }, [loadServices]);
-
   const loadAvailability = useCallback(async () => {
-    if (!serviceId) {
-      setAvailabilitySlots([]);
-      return;
-    }
-
-    setAvailabilityLoading(true);
-    setAvailabilityError(null);
+    if (!selectedServiceId || step !== 'schedule') return;
 
     try {
+      setAvailabilityLoading(true);
+      setAvailabilityError(null);
+      setSelectedSlotStartAt('');
+
       const weekStart = getWeekStart(selectedDate);
-      const slots = await getPublicAvailability(serviceId, weekStart);
+      const slots = await getPublicAvailability(selectedServiceId, weekStart);
       setAvailabilitySlots(slots);
-
-      const availableDates = Array.from(new Set(slots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort();
-
-      if (availableDates.length === 0) {
-        setSelectedDate(weekStart);
-        setSelectedSlotStartAt('');
-        return;
-      }
-
-      setSelectedDate((prev) => (availableDates.includes(prev) ? prev : availableDates[0]));
-      setSelectedSlotStartAt('');
     } catch (error) {
-      if (isHttpError(error)) {
-        setAvailabilityError(mapErrorMessage(error.status));
-      } else {
-        setAvailabilityError('No se pudo cargar disponibilidad. Intenta nuevamente.');
-      }
       setAvailabilitySlots([]);
-      setSelectedSlotStartAt('');
+      setAvailabilityError(isHttpError(error) ? mapErrorMessage(error.status) : 'Ocurrió un error. Intenta más tarde');
     } finally {
       setAvailabilityLoading(false);
     }
-  }, [selectedDate, serviceId]);
+  }, [selectedDate, selectedServiceId, step]);
+
+  useEffect(() => {
+    void loadServices();
+  }, [loadServices]);
 
   useEffect(() => {
     void loadAvailability();
   }, [loadAvailability]);
 
-  const days = useMemo(() => {
-    return Array.from(
-      new Set(availabilitySlots.map((slot) => getIsoDateKey(slot.slotStartAt)))
-    ).sort();
-  }, [availabilitySlots]);
+  const goToServiceStep = () => {
+    setSubmitError(null);
+    if (!fullName.trim() || !phone.trim()) {
+      setSubmitError('Escribe tu nombre y celular');
+      return;
+    }
+    setStep('service');
+  };
 
-  const slots = useMemo(() => {
-    return availabilitySlots
-      .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
-      .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime());
-  }, [availabilitySlots, selectedDate]);
-
-  const submitDisabled =
-    isSubmitting ||
-    servicesLoading ||
-    availabilityLoading ||
-    !fullName.trim() ||
-    !phone.trim() ||
-    !serviceId ||
-    !selectedSlotStartAt;
+  const goToScheduleStep = () => {
+    setSubmitError(null);
+    if (!selectedServiceId) {
+      setSubmitError('Elige un servicio');
+      return;
+    }
+    setStep('schedule');
+  };
 
   const handleSubmit = async () => {
-    if (submitDisabled) return;
-
-    setIsSubmitting(true);
-    setErrorMsg(null);
+    if (!selectedServiceId || !selectedSlotStartAt || isSubmitting) return;
 
     try {
+      setIsSubmitting(true);
+      setSubmitError(null);
       const response = await createPublicBookingRequest({
         fullName: fullName.trim(),
         phone: phone.trim(),
-        serviceId,
-        // slotStartAt from backend is the source of truth for timezone and exact slot boundaries.
+        serviceId: selectedServiceId,
         startAt: selectedSlotStartAt,
-        notes: notes.trim() ? notes.trim() : undefined,
         token: token || undefined,
       });
 
@@ -185,10 +206,9 @@ export default function MiniAppBookingScreen() {
         },
       });
     } catch (error) {
-      if (isHttpError(error)) {
-        setErrorMsg(mapErrorMessage(error.status));
-      } else {
-        setErrorMsg('No se pudo conectar con el servidor. Intenta nuevamente.');
+      setSubmitError(isHttpError(error) ? mapErrorMessage(error.status) : 'Ocurrió un error. Intenta más tarde');
+      if (isHttpError(error) && error.status === 409) {
+        void loadAvailability();
       }
     } finally {
       setIsSubmitting(false);
@@ -199,182 +219,377 @@ export default function MiniAppBookingScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>Agendar cita</Text>
-          <Text style={styles.subtitle}>Completa tus datos y envia tu solicitud</Text>
+          <Text style={styles.title}>Agenda tu cita</Text>
+          <Text style={styles.subtitle}>Te guiamos paso a paso</Text>
         </View>
 
-        <View style={styles.card}>
-          {servicesLoading ? <Text style={styles.infoText}>Cargando servicios...</Text> : null}
-          {servicesError ? <Text style={styles.errorText}>{servicesError}</Text> : null}
+        <View style={styles.summary}>
+          <SummaryRow label="Servicio" value={selectedService?.name ?? 'Sin elegir'} />
+          <SummaryRow label="Fecha y hora" value={selectedSlot ? `${formatDayLabel(selectedDate)} · ${formatTimeLabel(selectedSlot.slotStartAt)}` : 'Sin elegir'} />
+          <SummaryRow label="Estado" value={requestStatus} highlight />
+        </View>
 
-          <Text style={styles.label}>Nombre</Text>
-          <TextInput
-            value={fullName}
-            onChangeText={setFullName}
-            placeholder="Tu nombre"
-            placeholderTextColor={colors.gray500}
-            style={styles.input}
-          />
+        {submitError ? <Text style={styles.errorBanner}>{submitError}</Text> : null}
 
-          <Text style={styles.label}>Celular</Text>
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="+52..."
-            keyboardType="phone-pad"
-            placeholderTextColor={colors.gray500}
-            style={styles.input}
-          />
+        {step === 'details' ? (
+          <View style={styles.panel}>
+            <StepHeader current={1} title="Tus datos" />
 
-          <Text style={styles.label}>Servicio</Text>
-          <View style={styles.optionsWrap}>
-            {services.map((service) => {
-              const active = service.id === serviceId;
-              return (
-                <TouchableOpacity
-                  key={service.id}
-                  onPress={() => {
-                    setServiceId(service.id);
-                    setSelectedSlotStartAt('');
-                  }}
-                  style={[styles.optionBtn, active && styles.optionBtnActive]}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.optionText, active && styles.optionTextActive]}>{service.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            <Text style={styles.label}>Nombre</Text>
+            <TextInput
+              value={fullName}
+              onChangeText={setFullName}
+              placeholder="Ana López"
+              placeholderTextColor={colors.gray500}
+              style={styles.input}
+              autoCapitalize="words"
+            />
+
+            <Text style={styles.label}>Celular</Text>
+            <TextInput
+              value={phone}
+              onChangeText={setPhone}
+              placeholder="+526141234567"
+              placeholderTextColor={colors.gray500}
+              style={styles.input}
+              keyboardType="phone-pad"
+            />
+
+            <PrimaryAction
+              label="Continuar"
+              onPress={goToServiceStep}
+              disabled={!fullName.trim() || !phone.trim()}
+            />
           </View>
+        ) : null}
 
-          {availabilityLoading ? <Text style={styles.infoText}>Cargando disponibilidad...</Text> : null}
-          {availabilityError ? <Text style={styles.errorText}>{availabilityError}</Text> : null}
+        {step === 'service' ? (
+          <View style={styles.panel}>
+            <StepHeader current={2} title="Elige servicio" />
 
-          <Text style={styles.label}>Dia</Text>
-          <View style={styles.optionsWrap}>
-            {days.map((day) => {
-              const active = day === selectedDate;
-              return (
-                <TouchableOpacity
-                  key={day}
-                  onPress={() => {
-                    setSelectedDate(day);
-                    setSelectedSlotStartAt('');
-                  }}
-                  style={[styles.optionBtn, active && styles.optionBtnActive]}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.optionText, active && styles.optionTextActive]}>{day}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <Text style={styles.label}>Horario</Text>
-          <View style={styles.optionsWrap}>
-            {slots.map((slot) => {
-              const active = slot.slotStartAt === selectedSlotStartAt;
-              return (
-                <TouchableOpacity
-                  key={slot.slotStartAt}
-                  onPress={() => setSelectedSlotStartAt(slot.slotStartAt)}
-                  style={[styles.optionBtn, active && styles.optionBtnActive]}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.optionText, active && styles.optionTextActive]}>
-                    {formatHour(slot.slotStartAt)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {!availabilityLoading && !availabilityError && slots.length === 0 ? (
-            <Text style={styles.infoText}>Sin horarios disponibles para el dia seleccionado.</Text>
-          ) : null}
-
-          <Text style={styles.label}>Notas (opcional)</Text>
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Detalles para tu cita"
-            placeholderTextColor={colors.gray500}
-            style={[styles.input, styles.textArea]}
-            multiline
-          />
-
-          {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
-
-          <TouchableOpacity
-            onPress={() => void handleSubmit()}
-            disabled={submitDisabled}
-            style={[styles.submitBtn, submitDisabled && styles.submitBtnDisabled]}
-            activeOpacity={0.85}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator color={colors.black} />
+            {servicesLoading ? (
+              <LoadingInline label="Cargando servicios" />
+            ) : servicesError ? (
+              <RetryBlock message={servicesError} onPress={() => void loadServices()} />
+            ) : services.length === 0 ? (
+              <Text style={styles.emptyText}>No hay servicios disponibles.</Text>
             ) : (
-              <Text style={styles.submitText}>Enviar solicitud</Text>
+              <View style={styles.optionStack}>
+                {services.map((service) => {
+                  const active = service.id === selectedServiceId;
+                  return (
+                    <TouchableOpacity
+                      key={service.id}
+                      style={[styles.serviceCard, active && styles.selectedCard]}
+                      onPress={() => {
+                        setSelectedServiceId(service.id);
+                        setSelectedSlotStartAt('');
+                        setAvailabilitySlots([]);
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.serviceName, active && styles.selectedText]}>{service.name}</Text>
+                      {service.durationMinutes ? (
+                        <Text style={[styles.serviceMeta, active && styles.selectedSubtext]}>{service.durationMinutes} min</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             )}
-          </TouchableOpacity>
 
-          <Text style={styles.helpText}>Te avisaremos por WhatsApp cuando sea aprobada.</Text>
-        </View>
+            <PrimaryAction
+              label="Continuar"
+              onPress={goToScheduleStep}
+              disabled={!selectedServiceId || servicesLoading}
+            />
+            <SecondaryAction label="Regresar" onPress={() => setStep('details')} />
+          </View>
+        ) : null}
+
+        {step === 'schedule' ? (
+          <View style={styles.panel}>
+            <StepHeader current={3} title="Día y horario" />
+
+            <Text style={styles.label}>Día</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysRow}>
+              {dayOptions.map((day) => {
+                const active = day === selectedDate;
+                return (
+                  <TouchableOpacity
+                    key={day}
+                    style={[styles.dayButton, active && styles.selectedCard]}
+                    onPress={() => {
+                      setSelectedDate(day);
+                      setSelectedSlotStartAt('');
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.dayText, active && styles.selectedText]}>{formatDayLabel(day)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={styles.label}>Horario</Text>
+            {availabilityLoading ? (
+              <LoadingInline label="Buscando horarios" />
+            ) : availabilityError ? (
+              <RetryBlock message={availabilityError} onPress={() => void loadAvailability()} />
+            ) : visibleSlots.length === 0 ? (
+              <Text style={styles.emptyText}>No hay horarios disponibles ese día.</Text>
+            ) : (
+              <View style={styles.slotsGrid}>
+                {visibleSlots.map((slot) => {
+                  const active = slot.slotStartAt === selectedSlotStartAt;
+                  return (
+                    <TouchableOpacity
+                      key={slot.slotStartAt}
+                      style={[styles.slotButton, active && styles.selectedCard]}
+                      onPress={() => setSelectedSlotStartAt(slot.slotStartAt)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.slotText, active && styles.selectedText]}>{formatTimeLabel(slot.slotStartAt)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <PrimaryAction
+              label="Enviar solicitud"
+              onPress={() => void handleSubmit()}
+              disabled={!selectedSlotStartAt || availabilityLoading || isSubmitting}
+              loading={isSubmitting}
+            />
+            <SecondaryAction label="Cambiar servicio" onPress={() => setStep('service')} />
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function StepHeader({ current, title }: { current: number; title: string }) {
+  return (
+    <View style={styles.stepHeader}>
+      <Text style={styles.stepBadge}>Paso {current} de 3</Text>
+      <Text style={styles.stepTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function SummaryRow({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <View style={styles.summaryRow}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text style={[styles.summaryValue, highlight && styles.summaryValueHighlight]} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function LoadingInline({ label }: { label: string }) {
+  return (
+    <View style={styles.inlineState}>
+      <ActivityIndicator color={colors.gold} />
+      <Text style={styles.inlineText}>{label}</Text>
+    </View>
+  );
+}
+
+function RetryBlock({ message, onPress }: { message: string; onPress: () => void }) {
+  return (
+    <View style={styles.retryBlock}>
+      <Text style={styles.retryText}>{message}</Text>
+      <TouchableOpacity style={styles.retryButton} onPress={onPress} activeOpacity={0.85}>
+        <Text style={styles.retryButtonText}>Reintentar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function PrimaryAction({
+  label,
+  onPress,
+  disabled,
+  loading = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.primaryButton, disabled && styles.disabledButton]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.85}
+    >
+      {loading ? <ActivityIndicator color={colors.black} /> : <Text style={styles.primaryText}>{label}</Text>}
+    </TouchableOpacity>
+  );
+}
+
+function SecondaryAction({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.secondaryButton} onPress={onPress} activeOpacity={0.85}>
+      <Text style={styles.secondaryText}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.black },
   scroll: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  content: {
+    padding: spacing.lg,
+    paddingBottom: spacing.huge,
+    gap: spacing.md,
+  },
   header: { gap: spacing.xxs },
-  title: { ...typography.h2, color: colors.white },
-  subtitle: { ...typography.bodySmall, color: colors.gray400 },
-  card: {
+  title: { ...typography.h1, color: colors.white },
+  subtitle: { ...typography.body, color: colors.gray400 },
+  summary: {
     backgroundColor: colors.gray900,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.gray800,
     padding: spacing.lg,
     gap: spacing.sm,
   },
-  label: { ...typography.caption, color: colors.gray400, fontWeight: '700', textTransform: 'uppercase' },
-  input: {
-    backgroundColor: colors.gray800,
-    borderWidth: 1,
-    borderColor: colors.gray700,
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  summaryLabel: { ...typography.caption, color: colors.gray500, width: 86 },
+  summaryValue: { ...typography.bodySmall, color: colors.white, flex: 1, textAlign: 'right' },
+  summaryValueHighlight: { color: colors.gold, fontWeight: '700' },
+  errorBanner: {
+    ...typography.bodySmall,
+    color: colors.error,
+    backgroundColor: colors.errorLight,
     borderRadius: radii.md,
-    color: colors.white,
+    padding: spacing.md,
+  },
+  panel: {
+    backgroundColor: colors.white,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  stepHeader: { gap: spacing.xs },
+  stepBadge: { ...typography.caption, color: colors.goldDark, fontWeight: '700' },
+  stepTitle: { ...typography.h2, color: colors.black },
+  label: { ...typography.buttonSmall, color: colors.gray800 },
+  input: {
+    minHeight: 54,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.gray50,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    color: colors.black,
     fontSize: 16,
   },
-  textArea: { minHeight: 88, textAlignVertical: 'top' },
-  optionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  optionBtn: {
-    backgroundColor: colors.gray800,
+  optionStack: { gap: spacing.sm },
+  serviceCard: {
+    minHeight: 72,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.gray700,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    borderColor: colors.gray300,
+    backgroundColor: colors.gray50,
+    padding: spacing.lg,
+    justifyContent: 'center',
+    gap: spacing.xs,
   },
-  optionBtnActive: { backgroundColor: colors.gold, borderColor: colors.gold },
-  optionBtnDisabled: { opacity: 0.35 },
-  optionText: { ...typography.bodySmall, color: colors.white },
-  optionTextActive: { color: colors.black, fontWeight: '700' },
-  submitBtn: {
-    marginTop: spacing.sm,
-    minHeight: 52,
+  selectedCard: {
+    backgroundColor: colors.gold,
+    borderColor: colors.gold,
+  },
+  serviceName: { ...typography.subtitle, color: colors.black },
+  serviceMeta: { ...typography.bodySmall, color: colors.gray600 },
+  selectedText: { color: colors.black, fontWeight: '700' },
+  selectedSubtext: { color: colors.black },
+  daysRow: { gap: spacing.sm, paddingVertical: spacing.xs },
+  dayButton: {
+    minWidth: 104,
+    minHeight: 58,
     borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.gray50,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.gold,
+    paddingHorizontal: spacing.md,
   },
-  submitBtnDisabled: { opacity: 0.45 },
-  submitText: { ...typography.button, color: colors.black },
-  infoText: { ...typography.bodySmall, color: colors.gray400 },
-  errorText: { ...typography.bodySmall, color: colors.error },
-  helpText: { ...typography.caption, color: colors.gray500, textAlign: 'center' },
+  dayText: { ...typography.buttonSmall, color: colors.black, textTransform: 'capitalize' },
+  slotsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  slotButton: {
+    width: '47%',
+    minHeight: 54,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.gray50,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotText: { ...typography.button, color: colors.black },
+  primaryButton: {
+    minHeight: 58,
+    borderRadius: radii.md,
+    backgroundColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.xs,
+  },
+  disabledButton: { opacity: 0.45 },
+  primaryText: { ...typography.button, color: colors.black },
+  secondaryButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryText: { ...typography.buttonSmall, color: colors.gray600 },
+  inlineState: {
+    minHeight: 70,
+    borderRadius: radii.md,
+    backgroundColor: colors.gray50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  inlineText: { ...typography.bodySmall, color: colors.gray600 },
+  retryBlock: {
+    borderRadius: radii.md,
+    backgroundColor: colors.errorLight,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  retryText: { ...typography.bodySmall, color: colors.error },
+  retryButton: {
+    minHeight: 44,
+    borderRadius: radii.md,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButtonText: { ...typography.buttonSmall, color: colors.error },
+  emptyText: {
+    ...typography.body,
+    color: colors.gray600,
+    backgroundColor: colors.gray50,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    textAlign: 'center',
+  },
 });

@@ -11,12 +11,18 @@ export default function MiniAppSuccessScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.container}>
+        <View style={styles.iconCircle}>
+          <Text style={styles.iconText}>✓</Text>
+        </View>
         <Text style={styles.title}>Solicitud enviada</Text>
-        <Text style={styles.subtitle}>Tu cita queda pendiente de aprobacion.</Text>
+        <Text style={styles.subtitle}>Tu cita queda pendiente de aprobación</Text>
         <Text style={styles.message}>Te avisaremos por WhatsApp cuando sea aprobada.</Text>
 
         {params.appointmentId ? (
-          <Text style={styles.meta}>Folio: {params.appointmentId}</Text>
+          <View style={styles.receipt}>
+            <Text style={styles.receiptLabel}>Folio</Text>
+            <Text style={styles.receiptValue}>{params.appointmentId}</Text>
+          </View>
         ) : null}
 
         <TouchableOpacity style={styles.button} onPress={() => router.replace('/miniapp/booking')} activeOpacity={0.85}>
@@ -35,13 +41,33 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.md,
   },
+  iconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: spacing.sm,
+  },
+  iconText: { fontSize: 34, fontWeight: '700', color: colors.black },
   title: { ...typography.h2, color: colors.white, textAlign: 'center' },
   subtitle: { ...typography.subtitle, color: colors.gold, textAlign: 'center' },
   message: { ...typography.body, color: colors.gray300, textAlign: 'center' },
-  meta: { ...typography.caption, color: colors.gray500, textAlign: 'center' },
+  receipt: {
+    backgroundColor: colors.gray900,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  receiptLabel: { ...typography.caption, color: colors.gray500, textAlign: 'center' },
+  receiptValue: { ...typography.caption, color: colors.gray300, textAlign: 'center' },
   button: {
     marginTop: spacing.md,
-    minHeight: 52,
+    minHeight: 58,
     borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
