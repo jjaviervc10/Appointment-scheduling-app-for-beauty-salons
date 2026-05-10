@@ -6,6 +6,7 @@ import {
   cancelOwnerAppointment,
   completeOwnerAppointment,
   getOwnerAppointments,
+  getOwnerAwaitingAppointments,
   getOwnerPendingAppointments,
   getOwnerTodayAppointments,
   rejectOwnerAppointment,
@@ -19,6 +20,7 @@ function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel 
 
   return {
     id: row.id,
+    clientId: row.clients?.id,
     clientName: row.clients?.full_name ?? 'Cliente',
     clientPhone: row.clients?.phone ?? '',
     serviceId: row.services?.id,
@@ -55,6 +57,11 @@ export async function fetchAppointmentsByRange(
 
 export async function fetchPendingAppointments(): Promise<AppointmentViewModel[]> {
   const remote = await getOwnerPendingAppointments();
+  return remote.map(mapOwnerRowToViewModel);
+}
+
+export async function fetchAwaitingAppointments(): Promise<AppointmentViewModel[]> {
+  const remote = await getOwnerAwaitingAppointments();
   return remote.map(mapOwnerRowToViewModel);
 }
 

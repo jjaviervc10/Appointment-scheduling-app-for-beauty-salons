@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -8,15 +9,96 @@ import {
   TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, typography, radii, shadows } from '../../src/theme';
+import { colors, spacing, typography, radii } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
+import { getOwnerSettings, updateOwnerSettings } from '../../src/services/ownerApi';
+import { isHttpError } from '../../src/types/api';
 
 export default function SettingsScreen() {
-  const [businessName, setBusinessName] = useState('Jaquelina López Barber Studio');
-  const [slotDuration, setSlotDuration] = useState('45');
-  const [buffer, setBuffer] = useState('15');
-  const [maxAdvanceDays, setMaxAdvanceDays] = useState('30');
-  const [timezone, setTimezone] = useState('America/Mexico_City');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [businessName, setBusinessName] = useState('');
+  const [slotDuration, setSlotDuration] = useState('');
+  const [buffer, setBuffer] = useState('');
+  const [maxAdvanceDays, setMaxAdvanceDays] = useState('');
+  const [timezone, setTimezone] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    getOwnerSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        setBusinessName(settings.businessName);
+        setSlotDuration(String(settings.slotDurationMinutes));
+        setBuffer(String(settings.bufferMinutes));
+        setMaxAdvanceDays(String(settings.maxAdvanceDays));
+        setTimezone(settings.timezone);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(
+          isHttpError(err) ? err.message : 'No se pudo cargar la configuración del negocio.'
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSave = async () => {
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    const slotDurationMinutes = parseInt(slotDuration, 10);
+    const bufferMinutes = parseInt(buffer, 10);
+    const maxAdvanceDaysNum = parseInt(maxAdvanceDays, 10);
+
+    if (!businessName.trim() || businessName.trim().length < 2) {
+      setSaveError('El nombre del negocio debe tener al menos 2 caracteres.');
+      return;
+    }
+    if (isNaN(slotDurationMinutes) || slotDurationMinutes < 15 || slotDurationMinutes > 240) {
+      setSaveError('La duración por defecto debe estar entre 15 y 240 minutos.');
+      return;
+    }
+    if (isNaN(bufferMinutes) || bufferMinutes < 0 || bufferMinutes > 120) {
+      setSaveError('El buffer debe estar entre 0 y 120 minutos.');
+      return;
+    }
+    if (isNaN(maxAdvanceDaysNum) || maxAdvanceDaysNum < 1 || maxAdvanceDaysNum > 365) {
+      setSaveError('El máximo de anticipación debe estar entre 1 y 365 días.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updated = await updateOwnerSettings({
+        businessName: businessName.trim(),
+        slotDurationMinutes,
+        bufferMinutes,
+        maxAdvanceDays: maxAdvanceDaysNum,
+      });
+      setBusinessName(updated.businessName);
+      setSlotDuration(String(updated.slotDurationMinutes));
+      setBuffer(String(updated.bufferMinutes));
+      setMaxAdvanceDays(String(updated.maxAdvanceDays));
+      setTimezone(updated.timezone);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err) {
+      setSaveError(
+        isHttpError(err) ? err.message : 'No se pudo guardar la configuración.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -25,6 +107,17 @@ export default function SettingsScreen() {
         subtitle="Ajustes del negocio"
       />
 
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.gold} />
+          <Text style={styles.loadingText}>Cargando configuración...</Text>
+        </View>
+      ) : loadError ? (
+        <View style={styles.errorWrap}>
+          <Ionicons name="alert-circle-outline" size={40} color={colors.error} />
+          <Text style={styles.errorText}>{loadError}</Text>
+        </View>
+      ) : (
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         {/* Business Info */}
         <View style={styles.sectionCard}>
@@ -113,9 +206,32 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Feedback */}
+        {saveError ? (
+          <View style={styles.feedbackError}>
+            <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+            <Text style={styles.feedbackErrorText}>{saveError}</Text>
+          </View>
+        ) : null}
+        {saveSuccess ? (
+          <View style={styles.feedbackSuccess}>
+            <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
+            <Text style={styles.feedbackSuccessText}>Configuración guardada correctamente.</Text>
+          </View>
+        ) : null}
+
         {/* Save button */}
-        <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
-          <Text style={styles.saveButtonText}>Guardar cambios</Text>
+        <TouchableOpacity
+          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+          activeOpacity={0.8}
+          onPress={() => void handleSave()}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={colors.black} />
+          ) : (
+            <Text style={styles.saveButtonText}>Guardar cambios</Text>
+          )}
         </TouchableOpacity>
 
         {/* Info */}
@@ -126,12 +242,28 @@ export default function SettingsScreen() {
           </Text>
         </View>
       </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.black },
+  loadingWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  loadingText: { ...typography.body, color: colors.gray400 },
+  errorWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xxl,
+    gap: spacing.md,
+  },
+  errorText: { ...typography.body, color: colors.error, textAlign: 'center' },
   scrollView: {
     flex: 1,
   },
@@ -195,7 +327,32 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     alignItems: 'center',
   },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
   saveButtonText: { ...typography.button, color: colors.black },
+  feedbackError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.errorLight,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  feedbackErrorText: { ...typography.bodySmall, color: colors.error, flex: 1 },
+  feedbackSuccess: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.successLight,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.success,
+  },
+  feedbackSuccessText: { ...typography.bodySmall, color: colors.success, flex: 1 },
   infoBar: {
     flexDirection: 'row',
     alignItems: 'flex-start',

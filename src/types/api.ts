@@ -246,3 +246,40 @@ export class HttpError extends Error {
 export function isHttpError(error: unknown): error is HttpError {
   return error instanceof HttpError;
 }
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+export interface OwnerSettings {
+  businessName: string;
+  slotDurationMinutes: number;
+  bufferMinutes: number;
+  maxAdvanceDays: number;
+  timezone: string;
+}
+
+export interface OwnerSettingsResponse {
+  ok: true;
+  settings: OwnerSettings;
+}
+
+// ─── Incidents ────────────────────────────────────────────────────────────────
+
+export interface CreateIncidentInput {
+  severity: 'low' | 'medium' | 'high' | 'emergency';
+  /** Min 1, max 10. Each reason max 100 chars. */
+  reasons: string[];
+  description?: string | null;
+  cancelAppointments: boolean;
+  notifyClients: boolean;
+}
+
+export interface CreateIncidentResponse {
+  ok: true;
+  incident: {
+    id: string;
+    severity: string;
+    description: string | null;
+    created_at: string;
+    affectedAppointmentsCount: number;
+  };
+}

@@ -9,6 +9,7 @@ import type { AppointmentStatus } from './enums';
 /** Appointment card with service and client info resolved */
 export interface AppointmentViewModel {
   id: string;
+  clientId?: string;
   clientName: string;
   clientPhone: string;
   serviceId?: string;

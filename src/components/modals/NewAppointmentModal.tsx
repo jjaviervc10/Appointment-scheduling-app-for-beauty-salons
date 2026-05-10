@@ -23,11 +23,21 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onCreated?: () => void;
+  /** Pre-fill the client search field (e.g. phone from an inbound message) */
+  initialPhone?: string;
 }
 
 type Step = 1 | 2 | 3;
 
 const PAGE_SIZE = 50;
+
+/** Minimum lead time that the backend requires (mirrors the 422 rule). */
+const BOOKING_LEAD_MINUTES = 30;
+
+/** Returns true only if slotStartAt is at least BOOKING_LEAD_MINUTES from now. */
+function isSlotBookable(slotStartAt: string): boolean {
+  return new Date(slotStartAt).getTime() - Date.now() >= BOOKING_LEAD_MINUTES * 60 * 1000;
+}
 
 function getMonday(date: Date): Date {
   const d = new Date(date);
@@ -65,13 +75,14 @@ function mapError(error: unknown): string {
   return error instanceof Error ? error.message : 'Error desconocido al conectar con backend.';
 }
 
-export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
+export function NewAppointmentModal({ visible, onClose, onCreated, initialPhone }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
   const [step, setStep] = useState<Step>(1);
   const [clients, setClients] = useState<OwnerClientRow[]>([]);
   const [services, setServices] = useState<OwnerServiceRow[]>([]);
+  const [guestClient, setGuestClient] = useState<OwnerClientRow | null>(null);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [servicesLoading, setServicesLoading] = useState(false);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
@@ -87,8 +98,11 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
   const [notes, setNotes] = useState('');
 
   const selectedClient = useMemo(
-    () => clients.find((client) => client.id === selectedClientId) ?? null,
-    [clients, selectedClientId]
+    () => {
+      if (selectedClientId === '__guest__') return guestClient;
+      return clients.find((client) => client.id === selectedClientId) ?? null;
+    },
+    [clients, selectedClientId, guestClient]
   );
 
   const selectedService = useMemo(
@@ -99,14 +113,22 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
   const weekStartKey = useMemo(() => fmt(weekStart), [weekStart]);
 
   const availableDates = useMemo(
-    () => Array.from(new Set(availabilitySlots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort(),
+    () =>
+      Array.from(
+        new Set(
+          availabilitySlots
+            .filter((slot) => isSlotBookable(slot.slotStartAt))
+            .map((slot) => getIsoDateKey(slot.slotStartAt))
+        )
+      ).sort(),
     [availabilitySlots]
   );
 
   const visibleSlots = useMemo(
-    () => availabilitySlots
-      .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
-      .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime()),
+    () =>
+      availabilitySlots
+        .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate && isSlotBookable(slot.slotStartAt))
+        .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime()),
     [availabilitySlots, selectedDate]
   );
 
@@ -114,6 +136,7 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
     setStep(1);
     setQuery('');
     setSelectedClientId(null);
+    setGuestClient(null);
     setSelectedServiceId(null);
     setWeekStart(getMonday(new Date()));
     setSelectedDate('');
@@ -155,9 +178,12 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
 
   useEffect(() => {
     if (!visible) return;
-    void loadClients();
+    const phone = initialPhone?.trim() ?? '';
+    if (phone) setQuery(phone);
+    void loadClients(phone || undefined);
     void loadServices();
-  }, [loadClients, loadServices, visible]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]); // intentionally omit initialPhone/loadClients to only react to open/close
 
   useEffect(() => {
     if (!visible || !selectedServiceId) {
@@ -195,8 +221,13 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
 
   const handleSearch = useCallback((value: string) => {
     setQuery(value);
+    // If a guest client was selected and the user modifies the query, clear it
+    if (selectedClientId === '__guest__') {
+      setSelectedClientId(null);
+      setGuestClient(null);
+    }
     void loadClients(value);
-  }, [loadClients]);
+  }, [loadClients, selectedClientId]);
 
   const handleClose = useCallback(() => {
     resetForm();
@@ -295,7 +326,63 @@ export function NewAppointmentModal({ visible, onClose, onCreated }: Props) {
                   placeholder="Buscar por nombre o celular"
                   placeholderTextColor={colors.gray400}
                 />
-                {clients.length === 0 && !clientsLoading ? (
+
+                {/* No registered clients found — offer guest/unregistered option */}
+                {clients.length === 0 && !clientsLoading && query.trim() ? (
+                  <>
+                    <Text style={styles.emptyText}>
+                      No se encontró "{query.trim()}" en el sistema.
+                    </Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.optionCard,
+                        styles.guestCard,
+                        selectedClientId === '__guest__' && styles.optionCardSelected,
+                      ]}
+                      onPress={() => {
+                        const phone = query.trim();
+                        const newGuest: OwnerClientRow = {
+                          id: '__guest__',
+                          full_name: phone,
+                          phone,
+                          created_at: '',
+                          last_seen_at: null,
+                          totalAppointments: null,
+                          lastAppointmentAt: null,
+                          lastServiceName: null,
+                          nextAppointmentAt: null,
+                        };
+                        setGuestClient(newGuest);
+                        setSelectedClientId('__guest__');
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[
+                        styles.avatar,
+                        styles.guestAvatar,
+                        selectedClientId === '__guest__' && styles.avatarSelected,
+                      ]}>
+                        <Ionicons
+                          name="person-add-outline"
+                          size={16}
+                          color={selectedClientId === '__guest__' ? colors.black : colors.gold}
+                        />
+                      </View>
+                      <View style={styles.optionInfo}>
+                        <Text style={[
+                          styles.optionName,
+                          selectedClientId === '__guest__' && styles.optionNameSelected,
+                        ]}>
+                          Crear cita sin registrar cliente
+                        </Text>
+                        <Text style={styles.optionSub}>{query.trim()}</Text>
+                      </View>
+                      {selectedClientId === '__guest__' ? (
+                        <Ionicons name="checkmark-circle" size={22} color={colors.gold} />
+                      ) : null}
+                    </TouchableOpacity>
+                  </>
+                ) : clients.length === 0 && !clientsLoading ? (
                   <Text style={styles.emptyText}>No hay clientes para mostrar.</Text>
                 ) : null}
                 {clients.map((client) => {
@@ -596,6 +683,14 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   optionCardSelected: { borderColor: colors.gold, backgroundColor: `${colors.gold}08` },
+  guestCard: {
+    borderStyle: 'dashed',
+    borderColor: colors.gold + '60',
+    backgroundColor: colors.gold + '05',
+  },
+  guestAvatar: {
+    backgroundColor: colors.gold + '18',
+  },
   avatar: {
     width: 40,
     height: 40,

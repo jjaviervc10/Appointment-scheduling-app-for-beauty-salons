@@ -96,6 +96,14 @@ function mapErrorMessage(status: number): string {
   return 'No se pudo completar. Intenta otra vez';
 }
 
+/** Minimum lead time the backend requires (mirrors the 422 rule).
+ *  Filtering slots client-side prevents selecting an unbookable slot. */
+const BOOKING_LEAD_MINUTES = 30;
+
+function isSlotBookable(slotStartAt: string): boolean {
+  return new Date(slotStartAt).getTime() - Date.now() >= BOOKING_LEAD_MINUTES * 60 * 1000;
+}
+
 export default function MiniAppBookingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -137,7 +145,7 @@ export default function MiniAppBookingScreen() {
   const visibleSlots = useMemo(
     () =>
       availabilitySlots
-        .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate)
+        .filter((slot) => getIsoDateKey(slot.slotStartAt) === selectedDate && isSlotBookable(slot.slotStartAt))
         .sort((a, b) => new Date(a.slotStartAt).getTime() - new Date(b.slotStartAt).getTime()),
     [availabilitySlots, selectedDate],
   );
@@ -699,10 +707,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.md,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.10,
-    shadowRadius: 10,
+    boxShadow: '0px 3px 10px rgba(0,0,0,0.10)',
     elevation: 4,
   },
   cardHeader: { gap: spacing.xs },

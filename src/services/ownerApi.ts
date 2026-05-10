@@ -18,11 +18,19 @@ import type {
   OwnerWeeklyAvailabilityRow,
   OwnerWeeklyAvailabilityUpdateInput,
   OwnerWeeklyAvailabilityDeleteResponse,
+  OwnerSettings,
+  OwnerSettingsResponse,
+  CreateIncidentInput,
+  CreateIncidentResponse,
 } from '../types/api';
 import type {
   OwnerMessagesParams,
   OwnerMessagesResponse,
   RetryOwnerMessageResponse,
+  OwnerInboundMessagesParams,
+  OwnerInboundMessagesResponse,
+  MarkInboundReadResponse,
+  LinkInboundAppointmentResponse,
 } from '../types/messages';
 
 export async function getOwnerAppointments(params: {
@@ -143,18 +151,13 @@ export async function deleteOwnerTimeBlock(id: string): Promise<{ id: string; is
 export async function getOwnerMessages(params: OwnerMessagesParams = {}): Promise<OwnerMessagesResponse> {
   const query = new URLSearchParams();
 
-  if (params.status) {
-    query.set('status', params.status);
-  }
-  if (params.messageType) {
-    query.set('messageType', params.messageType);
-  }
-  if (params.page) {
-    query.set('page', String(params.page));
-  }
-  if (params.limit) {
-    query.set('limit', String(params.limit));
-  }
+  if (params.status) query.set('status', params.status);
+  if (params.messageType) query.set('messageType', params.messageType);
+  if (params.clientId) query.set('clientId', params.clientId);
+  if (params.startDate) query.set('startDate', params.startDate);
+  if (params.endDate) query.set('endDate', params.endDate);
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
 
   const suffix = query.toString() ? `?${query.toString()}` : '';
   return apiRequest<OwnerMessagesResponse>(`/api/owner/messages${suffix}`, {
@@ -278,4 +281,94 @@ export async function rescheduleOwnerAppointment(
     }
   );
   return response.appointment;
+}
+
+// ─── Inbound messages ────────────────────────────────────────────────────────
+
+export async function getOwnerInboundMessages(
+  params: OwnerInboundMessagesParams = {}
+): Promise<OwnerInboundMessagesResponse> {
+  const query = new URLSearchParams();
+
+  if (params.intent) query.set('intent', params.intent);
+  if (params.needs_human_review !== undefined) query.set('needs_human_review', String(params.needs_human_review));
+  if (params.read !== undefined) query.set('read', String(params.read));
+  if (params.page) query.set('page', String(params.page));
+  if (params.limit) query.set('limit', String(params.limit));
+
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiRequest<OwnerInboundMessagesResponse>(`/api/owner/inbound-messages${suffix}`, {
+    requiresOwnerAuth: true,
+  });
+}
+
+export async function markInboundMessageRead(
+  id: string
+): Promise<MarkInboundReadResponse['message']> {
+  const response = await apiRequest<MarkInboundReadResponse>(
+    `/api/owner/inbound-messages/${encodeURIComponent(id)}/read`,
+    {
+      method: 'PATCH',
+      body: {},
+      requiresOwnerAuth: true,
+    }
+  );
+  return response.message;
+}
+
+export async function linkInboundMessageAppointment(
+  id: string,
+  appointmentId: string
+): Promise<LinkInboundAppointmentResponse['message']> {
+  const response = await apiRequest<LinkInboundAppointmentResponse>(
+    `/api/owner/inbound-messages/${encodeURIComponent(id)}/link-appointment`,
+    {
+      method: 'POST',
+      body: { appointmentId },
+      requiresOwnerAuth: true,
+    }
+  );
+  return response.message;
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+export async function getOwnerSettings(): Promise<OwnerSettings> {
+  const response = await apiRequest<OwnerSettingsResponse>('/api/owner/settings', {
+    requiresOwnerAuth: true,
+  });
+  return response.settings;
+}
+
+export async function updateOwnerSettings(
+  payload: Partial<OwnerSettings>
+): Promise<OwnerSettings> {
+  const response = await apiRequest<OwnerSettingsResponse>('/api/owner/settings', {
+    method: 'PATCH',
+    body: payload,
+    requiresOwnerAuth: true,
+  });
+  return response.settings;
+}
+
+// ─── Incidents ────────────────────────────────────────────────────────────────
+
+export async function createOwnerIncident(
+  input: CreateIncidentInput
+): Promise<CreateIncidentResponse['incident']> {
+  const response = await apiRequest<CreateIncidentResponse>('/api/owner/incidents', {
+    method: 'POST',
+    body: input,
+    requiresOwnerAuth: true,
+  });
+  return response.incident;
+}
+
+// ─── Awaiting appointments ────────────────────────────────────────────────────
+
+export async function getOwnerAwaitingAppointments(): Promise<OwnerAppointmentRow[]> {
+  const response = await apiRequest<OwnerListResponse>('/api/owner/appointments/awaiting', {
+    requiresOwnerAuth: true,
+  });
+  return response.data;
 }

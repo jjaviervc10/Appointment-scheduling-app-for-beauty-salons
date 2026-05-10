@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -8,14 +9,17 @@ import {
   ScrollView,
   TextInput,
   useWindowDimensions,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
+import { createOwnerIncident } from '../../services/ownerApi';
+import { isHttpError } from '../../types/api';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  /** Called after a successful incident creation with the number of affected appointments. */
+  onCreated?: (affectedCount: number) => void;
 }
 
 const SEVERITY_LEVELS = [
@@ -36,7 +40,7 @@ const QUICK_REASONS = [
   'Otro',
 ];
 
-export function IncidentModal({ visible, onClose }: Props) {
+export function IncidentModal({ visible, onClose, onCreated }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -45,6 +49,8 @@ export function IncidentModal({ visible, onClose }: Props) {
   const [description, setDescription] = useState('');
   const [cancelCitas, setCancelCitas] = useState(false);
   const [notifyClients, setNotifyClients] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [incidentError, setIncidentError] = useState<string | null>(null);
 
   const severityConfig = SEVERITY_LEVELS.find(s => s.key === severity);
 
@@ -54,17 +60,28 @@ export function IncidentModal({ visible, onClose }: Props) {
     );
   };
 
-  const handleCreate = () => {
-    const affectedCount = severity === 'emergency' ? 'todas las citas del día' :
-      severity === 'high' ? '3 citas afectadas' :
-      severity === 'medium' ? '1 cita afectada' : 'ninguna cita afectada';
-
-    Alert.alert(
-      '⚠️ Incidencia registrada (simulación)',
-      `Severidad: ${severityConfig?.label}\nMotivo: ${selectedReasons.join(', ') || 'No especificado'}\nDescripción: ${description || '—'}\nImpacto: ${affectedCount}\n${cancelCitas ? '❌ Citas canceladas' : '✅ Citas intactas'}\n${notifyClients ? '📱 Clientes notificados' : '🔇 Sin notificación'}`,
-      [{ text: 'OK', onPress: onClose }],
-    );
-    resetForm();
+  const handleCreate = async () => {
+    if (!severity) return;
+    setIncidentError(null);
+    setSubmitting(true);
+    try {
+      const result = await createOwnerIncident({
+        severity: severity as 'low' | 'medium' | 'high' | 'emergency',
+        reasons: selectedReasons.length > 0 ? selectedReasons : ['Sin especificar'],
+        description: description.trim() || null,
+        cancelAppointments: cancelCitas,
+        notifyClients,
+      });
+      resetForm();
+      onCreated?.(result.affectedAppointmentsCount);
+      onClose();
+    } catch (err) {
+      setIncidentError(
+        isHttpError(err) ? err.message : 'No se pudo registrar la incidencia. Intenta de nuevo.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -73,6 +90,8 @@ export function IncidentModal({ visible, onClose }: Props) {
     setDescription('');
     setCancelCitas(false);
     setNotifyClients(true);
+    setSubmitting(false);
+    setIncidentError(null);
   };
 
   const handleClose = () => {
@@ -244,18 +263,32 @@ export function IncidentModal({ visible, onClose }: Props) {
 
           {/* Footer */}
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.btnCancel} onPress={handleClose}>
+            {incidentError ? (
+              <View style={styles.footerError}>
+                <Ionicons name="alert-circle-outline" size={14} color={colors.error} />
+                <Text style={styles.footerErrorText}>{incidentError}</Text>
+              </View>
+            ) : null}
+            <View style={styles.footerActions}>
+            <TouchableOpacity style={styles.btnCancel} onPress={handleClose} disabled={submitting}>
               <Text style={styles.btnCancelText}>Cancelar</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btnCreate, !severity && styles.btnDisabled]}
-              onPress={handleCreate}
-              disabled={!severity}
+              style={[styles.btnCreate, (!severity || submitting) && styles.btnDisabled]}
+              onPress={() => void handleCreate()}
+              disabled={!severity || submitting}
               activeOpacity={0.8}
             >
-              <Ionicons name="warning" size={18} color={colors.white} />
-              <Text style={styles.btnCreateText}>Registrar incidencia</Text>
+              {submitting ? (
+                <ActivityIndicator size="small" color={colors.white} />
+              ) : (
+                <Ionicons name="warning" size={18} color={colors.white} />
+              )}
+              <Text style={styles.btnCreateText}>
+                {submitting ? 'Registrando...' : 'Registrar incidencia'}
+              </Text>
             </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -495,13 +528,32 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
+    flexDirection: 'column',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.gray800,
+    gap: spacing.sm,
+  },
+  footerError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.errorLight,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  footerErrorText: {
+    ...typography.caption,
+    color: colors.error,
+    flex: 1,
+  },
+  footerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: spacing.md,
   },
   btnCancel: {

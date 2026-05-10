@@ -1,7 +1,7 @@
 ﻿import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, useWindowDimensions, Text, Alert } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, Text, Alert, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors, spacing } from '../../src/theme';
+import { colors, radii, spacing, typography } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
 import { KPIStats, type KPIKey } from '../../src/components/dashboard/KPIStats';
 import { QuickActionsBar } from '../../src/components/dashboard/QuickActionsBar';
@@ -15,7 +15,7 @@ import { RescheduleModal, type RescheduleSimulationResult } from '../../src/comp
 import { KPIFilterModal } from '../../src/components/modals/KPIFilterModal';
 import type { AppointmentViewModel } from '../../src/types/models';
 import type { TimeBlock } from '../../src/types/database';
-import { fetchAppointmentsByDate, fetchPendingAppointments, updateAppointmentStatus } from '../../src/services/appointments';
+import { fetchAppointmentsByDate, fetchAwaitingAppointments, fetchPendingAppointments, updateAppointmentStatus } from '../../src/services/appointments';
 import { fetchTimeBlocks } from '../../src/services/availability';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
@@ -69,6 +69,7 @@ export default function DashboardScreen() {
   const [kpiFilter, setKpiFilter] = useState<KPIKey | null>(null);
   const [todayAppts, setTodayAppts] = useState<AppointmentViewModel[]>([]);
   const [pending, setPending] = useState<AppointmentViewModel[]>([]);
+  const [awaiting, setAwaiting] = useState<AppointmentViewModel[]>([]);
   const [todayBlocks, setTodayBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -98,20 +99,23 @@ export default function DashboardScreen() {
     });
 
     try {
-      const [pendingData, todayData, blocksData] = await Promise.all([
+      const [pendingData, todayData, blocksData, awaitingData] = await Promise.all([
         fetchPendingAppointments(),
         fetchAppointmentsByDate(todayStr),
         fetchTimeBlocks(todayStr),
+        fetchAwaitingAppointments(),
       ]);
       setPending(pendingData);
       setTodayAppts(todayData);
       setTodayBlocks(blocksData);
+      setAwaiting(awaitingData);
     } catch (error) {
       logDashboardActionError('load_dashboard_data', error, {
         endpoints: [
           'GET /api/owner/appointments/pending',
           'GET /api/owner/appointments/today',
           'GET /api/owner/time-blocks',
+          'GET /api/owner/appointments/awaiting',
         ],
         todayStr,
       });
@@ -125,6 +129,7 @@ export default function DashboardScreen() {
         setPending([]);
         setTodayAppts([]);
         setTodayBlocks([]);
+        setAwaiting([]);
       }
     } finally {
       if (!opts?.silent) {
@@ -301,8 +306,24 @@ export default function DashboardScreen() {
       const appt = todayAppts.find((item) => item.id === id);
       if (!appt) return;
 
+      // Allow approving directly from timeline when the appointment is still pending
+      if (appt.status === 'pending_owner_approval') {
+        Alert.alert(
+          'Aprobar cita',
+          `¿Aprobar la cita de ${appt.clientName} a las ${appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}?`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Aprobar', onPress: () => void runAction(id, 'approve') },
+          ],
+        );
+        return;
+      }
+
       if (appt.status !== 'confirmed_by_owner') {
-        Alert.alert('Sin cambios', 'Solo citas confirmadas por owner pueden marcarse como completadas.');
+        Alert.alert(
+          'Sin acción disponible',
+          `Estado actual: "${appt.status}". Solo citas confirmadas pueden marcarse como completadas.`,
+        );
         return;
       }
 
@@ -316,10 +337,14 @@ export default function DashboardScreen() {
 
   const handleRescheduleComplete = useCallback(
     (result: RescheduleSimulationResult) => {
-      const rescheduled = pending.find(a => a.id === result.appointmentId);
+      // Look up in both pending and awaiting lists
+      const rescheduled =
+        pending.find(a => a.id === result.appointmentId) ??
+        awaiting.find(a => a.id === result.appointmentId);
 
-      // 1. Remove from pending (optimistic)
+      // 1. Optimistic remove from both pending and awaiting
       setPending(prev => prev.filter(a => a.id !== result.appointmentId));
+      setAwaiting(prev => prev.filter(a => a.id !== result.appointmentId));
 
       // 2. Update todayAppts based on new status and dates
       if (rescheduled) {
@@ -375,7 +400,7 @@ export default function DashboardScreen() {
       scheduleSilentRefetch();
       setRescheduleId(null);
     },
-    [pending, todayStr, scheduleSilentRefetch]
+    [pending, awaiting, todayStr, scheduleSilentRefetch]
   );
 
   return (
@@ -421,6 +446,42 @@ export default function DashboardScreen() {
           onSendMessage={() => router.push('/(owner)/messages' as any)}
         />
       </View>
+
+      {/* Awaiting panel — only shown when there are items */}
+      {awaiting.length > 0 && (
+        <View style={styles.awaitingSection}>
+          <View style={styles.awaitingHeader}>
+            <View style={styles.awaitingBadge}>
+              <Text style={styles.awaitingBadgeText}>{awaiting.length}</Text>
+            </View>
+            <Text style={styles.awaitingTitle}>En espera de confirmación</Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.awaitingScroll}
+          >
+            {awaiting.map((appt) => (
+              <View key={appt.id} style={styles.awaitingCard}>
+                <Text style={styles.awaitingCardName} numberOfLines={1}>{appt.clientName}</Text>
+                <Text style={styles.awaitingCardService} numberOfLines={1}>{appt.serviceName}</Text>
+                <Text style={styles.awaitingCardTime}>
+                  {appt.startAt.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
+                  {' · '}
+                  {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+                <TouchableOpacity
+                  style={styles.awaitingCardBtn}
+                  onPress={() => setRescheduleId(appt.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.awaitingCardBtnText}>Reprogramar</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      )}
 
       {/* Two-pane operational area: side-by-side on desktop, stacked on mobile */}
       <View style={[styles.panesContainer, !isMobile && styles.panesContainerDesktop]}>
@@ -475,10 +536,14 @@ export default function DashboardScreen() {
           void loadDashboardData({ silent: true });
         }}
       />
-      <IncidentModal visible={showIncident} onClose={() => setShowIncident(false)} />
+      <IncidentModal
+        visible={showIncident}
+        onClose={() => setShowIncident(false)}
+        onCreated={() => void loadDashboardData({ silent: true })}
+      />
       <RescheduleModal
         visible={!!rescheduleId}
-        appointment={[...pending, ...todayAppts].find(a => a.id === rescheduleId) || null}
+        appointment={[...pending, ...awaiting, ...todayAppts].find(a => a.id === rescheduleId) || null}
         onClose={() => setRescheduleId(null)}
         onSimulationComplete={handleRescheduleComplete}
       />
@@ -600,6 +665,77 @@ const styles = StyleSheet.create({
   feedbackDismiss: {
     color: colors.gold,
     fontSize: 12,
+    fontWeight: '700',
+  },
+  // Awaiting panel
+  awaitingSection: {
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  awaitingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  awaitingBadge: {
+    backgroundColor: colors.statusAwaitingClient,
+    borderRadius: radii.full,
+    minWidth: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  awaitingBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  awaitingTitle: {
+    ...typography.subtitle,
+    color: colors.statusAwaitingClient,
+    fontSize: 13,
+  },
+  awaitingScroll: {
+    gap: spacing.sm,
+    paddingRight: spacing.xxl,
+  },
+  awaitingCard: {
+    backgroundColor: colors.gray900,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.statusAwaitingClient + '60',
+    padding: spacing.md,
+    minWidth: 180,
+    maxWidth: 220,
+    gap: spacing.xxs,
+  },
+  awaitingCardName: {
+    ...typography.subtitle,
+    color: colors.white,
+    fontSize: 13,
+  },
+  awaitingCardService: {
+    ...typography.caption,
+    color: colors.gray400,
+  },
+  awaitingCardTime: {
+    ...typography.caption,
+    color: colors.statusAwaitingClient,
+  },
+  awaitingCardBtn: {
+    marginTop: spacing.xs,
+    backgroundColor: colors.statusAwaitingClient + '20',
+    borderRadius: radii.sm,
+    paddingVertical: spacing.xs,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.statusAwaitingClient + '60',
+  },
+  awaitingCardBtnText: {
+    ...typography.caption,
+    color: colors.statusAwaitingClient,
     fontWeight: '700',
   },
 });
