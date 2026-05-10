@@ -114,6 +114,20 @@ function isSlotBookable(slotStartAt: string): boolean {
   return new Date(slotStartAt).getTime() - Date.now() >= BOOKING_LEAD_MINUTES * 60 * 1000;
 }
 
+/** Returns a human-readable label for person at `index` within a booking group. */
+function getPersonLabel(
+  index: number,
+  familyWho: 'papa_hijos' | 'solo_hijos',
+  appointmentType: 'individual' | 'familiar',
+): string {
+  if (appointmentType === 'individual') return 'Para ti';
+  if (familyWho === 'papa_hijos') {
+    if (index === 0) return 'Para ti';
+    return `Hijo ${index}`;
+  }
+  return `Hijo ${index + 1}`;
+}
+
 export default function MiniAppBookingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -135,7 +149,9 @@ export default function MiniAppBookingScreen() {
   const [services, setServices] = useState<PublicService[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
   const [servicesError, setServicesError] = useState<string | null>(null);
-  const [selectedServiceId, setSelectedServiceId] = useState('');
+  // Multi-select: servicesPerPerson[personIndex] = array of selected serviceIds
+  const [servicesPerPerson, setServicesPerPerson] = useState<string[][]>([[]]);
+  const [servicePersonIndex, setServicePersonIndex] = useState(0);
   const [selectedDate, setSelectedDate] = useState(dayOptions[0] ?? dateKey(new Date()));
   const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
@@ -149,9 +165,24 @@ export default function MiniAppBookingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const currentStepIndex = STEP_ORDER.indexOf(step) + 1;
-  const selectedService = useMemo(
-    () => services.find((service) => service.id === selectedServiceId) ?? null,
-    [services, selectedServiceId],
+
+  // Total number of people (1 for individual; 1+childCount for papa_hijos; childCount for solo_hijos)
+  const totalPersons = useMemo(() => {
+    if (appointmentType === 'individual') return 1;
+    if (familyWho === 'papa_hijos') return 1 + childCount;
+    return childCount;
+  }, [appointmentType, familyWho, childCount]);
+
+  // Primary service used for slot scheduling (first service of first person)
+  const primaryServiceId = useMemo(
+    () => servicesPerPerson[0]?.[0] ?? '',
+    [servicesPerPerson],
+  );
+
+  // Services selected for the currently active person in the wizard
+  const currentPersonServiceIds = useMemo(
+    () => servicesPerPerson[servicePersonIndex] ?? [],
+    [servicesPerPerson, servicePersonIndex],
   );
 
   const selectedSlot = useMemo(
@@ -182,14 +213,14 @@ export default function MiniAppBookingScreen() {
   }, []);
 
   const loadAvailability = useCallback(async () => {
-    if (!selectedServiceId || step !== 'schedule') return;
+    if (!primaryServiceId || step !== 'schedule') return;
 
     try {
       setAvailabilityLoading(true);
       setAvailabilityError(null);
       setSelectedSlotStartAt('');
 
-      const slots = await getPublicAvailability(selectedServiceId, getWeekStart(selectedDate));
+      const slots = await getPublicAvailability(primaryServiceId, getWeekStart(selectedDate));
       setAvailabilitySlots(slots);
     } catch (error) {
       setAvailabilitySlots([]);
@@ -197,7 +228,7 @@ export default function MiniAppBookingScreen() {
     } finally {
       setAvailabilityLoading(false);
     }
-  }, [selectedDate, selectedServiceId, step]);
+  }, [selectedDate, primaryServiceId, step]);
 
   useEffect(() => {
     void loadServices();
@@ -236,16 +267,63 @@ export default function MiniAppBookingScreen() {
       setFormError('Celular inválido. Ingresa 10 dígitos o +52 seguido de 10 dígitos');
       return;
     }
+    // Initialise a fresh services array sized for all persons
+    const persons = appointmentType === 'individual'
+      ? 1
+      : familyWho === 'papa_hijos'
+        ? 1 + childCount
+        : childCount;
+    setServicesPerPerson(Array.from({ length: persons }, () => []));
+    setServicePersonIndex(0);
     setStep('service');
   };
 
-  const goToSchedule = () => {
+  /** Toggle a service on/off for the currently active person */
+  const toggleServiceForPerson = (serviceId: string) => {
+    setServicesPerPerson((prev) =>
+      prev.map((ids, i) =>
+        i === servicePersonIndex
+          ? ids.includes(serviceId)
+            ? ids.filter((id) => id !== serviceId)
+            : [...ids, serviceId]
+          : ids,
+      ),
+    );
+    // Reset slot because primary service may have changed
+    setSelectedSlotStartAt('');
+    setAvailabilitySlots([]);
+  };
+
+  /** Advance to the next person's services, or proceed to schedule if all done */
+  const goToNextPersonOrSchedule = () => {
     setFormError(null);
-    if (!selectedServiceId) {
-      setFormError('Elige un servicio');
+    if (currentPersonServiceIds.length === 0) {
+      setFormError('Elige al menos un servicio');
       return;
     }
-    setStep('schedule');
+    if (servicePersonIndex < totalPersons - 1) {
+      setServicePersonIndex((prev) => prev + 1);
+    } else {
+      setSelectedSlotStartAt('');
+      setAvailabilitySlots([]);
+      setStep('schedule');
+    }
+  };
+
+  /** Navigate backwards within the service wizard */
+  const goBackInServiceWizard = () => {
+    setFormError(null);
+    if (servicePersonIndex === 0) {
+      setStep('details');
+    } else {
+      setServicePersonIndex((prev) => prev - 1);
+    }
+  };
+
+  /** Return to last person of service wizard from schedule step */
+  const goBackToLastServicePerson = () => {
+    setServicePersonIndex(totalPersons - 1);
+    setStep('service');
   };
 
   const goToConfirm = () => {
@@ -258,21 +336,30 @@ export default function MiniAppBookingScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedServiceId || !selectedSlotStartAt || isSubmitting) return;
+    if (!primaryServiceId || !selectedSlotStartAt || isSubmitting) return;
 
     try {
       setIsSubmitting(true);
       setFormError(null);
 
-      const familyNote = appointmentType === 'familiar'
-        ? `[Tipo: familiar] ${familyWho === 'papa_hijos' ? 'Papá + hijos' : 'Solo hijos'} (${childCount} hijo${childCount > 1 ? 's' : ''})`
-        : '';
-      const finalNotes = [familyNote, notes.trim()].filter(Boolean).join(' · ');
+      const parts: string[] = [];
+      if (appointmentType === 'familiar') {
+        const whoLabel = familyWho === 'papa_hijos' ? 'Papá + hijos' : 'Solo hijos';
+        parts.push(`[Familiar] ${whoLabel} (${childCount} hijo${childCount > 1 ? 's' : ''})`);
+      }
+      servicesPerPerson.forEach((ids, i) => {
+        if (ids.length === 0) return;
+        const label = getPersonLabel(i, familyWho, appointmentType);
+        const names = ids.map((id) => services.find((s) => s.id === id)?.name ?? id).join(', ');
+        parts.push(`${label}: ${names}`);
+      });
+      if (notes.trim()) parts.push(notes.trim());
+      const finalNotes = parts.join(' · ');
 
       const response = await createPublicBookingRequest({
         fullName: fullName.trim(),
         phone: phone.trim(),
-        serviceId: selectedServiceId,
+        serviceId: primaryServiceId,
         startAt: selectedSlotStartAt,
         notes: finalNotes || undefined,
         token: token || undefined,
@@ -400,7 +487,31 @@ export default function MiniAppBookingScreen() {
           ) : null}
 
           {step === 'service' ? (
-            <WizardCard title="Elige un servicio" helper="Selecciona una opción">
+            <WizardCard
+              title={getPersonLabel(servicePersonIndex, familyWho, appointmentType)}
+              subtitle={
+                totalPersons > 1
+                  ? `Persona ${servicePersonIndex + 1} de ${totalPersons}`
+                  : undefined
+              }
+              helper="Selecciona uno o más servicios"
+            >
+              {/* Sub-progress bar for multi-person flow */}
+              {totalPersons > 1 ? (
+                <View style={styles.personProgressRow}>
+                  {Array.from({ length: totalPersons }, (_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.personProgressDot,
+                        i < servicePersonIndex && styles.personProgressDotDone,
+                        i === servicePersonIndex && styles.personProgressDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+              ) : null}
+
               {servicesLoading ? (
                 <LoadingInline label="Cargando servicios" />
               ) : servicesError ? (
@@ -410,19 +521,18 @@ export default function MiniAppBookingScreen() {
               ) : (
                 <View style={styles.optionStack}>
                   {services.map((service) => {
-                    const active = service.id === selectedServiceId;
+                    const active = currentPersonServiceIds.includes(service.id);
                     return (
                       <TouchableOpacity
                         key={service.id}
-                        style={[styles.serviceCard, active && styles.selectedCard]}
-                        onPress={() => {
-                          setSelectedServiceId(service.id);
-                          setSelectedSlotStartAt('');
-                          setAvailabilitySlots([]);
-                        }}
+                        style={[styles.serviceCard, active && styles.serviceCardSelected]}
+                        onPress={() => toggleServiceForPerson(service.id)}
                         activeOpacity={0.85}
                       >
                         <View style={styles.serviceHeader}>
+                          <View style={[styles.serviceCheckbox, active && styles.serviceCheckboxActive]}>
+                            {active ? <Ionicons name="checkmark" size={14} color={colors.black} /> : null}
+                          </View>
                           <Text style={[styles.serviceName, active && styles.selectedText]}>{service.name}</Text>
                           <View style={styles.serviceBadges}>
                             {service.price != null ? (
@@ -442,14 +552,21 @@ export default function MiniAppBookingScreen() {
                             {service.description}
                           </Text>
                         ) : null}
-                        {active ? (
-                          <Text style={styles.serviceCheckBadge}>✓ Seleccionado</Text>
-                        ) : null}
                       </TouchableOpacity>
                     );
                   })}
                 </View>
               )}
+
+              {/* Selection summary chip */}
+              {currentPersonServiceIds.length > 0 ? (
+                <View style={styles.selectionSummary}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.goldDark} />
+                  <Text style={styles.selectionSummaryText}>
+                    {currentPersonServiceIds.length} servicio{currentPersonServiceIds.length > 1 ? 's' : ''} seleccionado{currentPersonServiceIds.length > 1 ? 's' : ''}
+                  </Text>
+                </View>
+              ) : null}
 
               <TouchableOpacity
                 style={styles.emergencyCard}
@@ -469,11 +586,18 @@ export default function MiniAppBookingScreen() {
               </TouchableOpacity>
 
               <PrimaryAction
-                label="Continuar"
-                onPress={goToSchedule}
-                disabled={!selectedServiceId || servicesLoading}
+                label={
+                  servicePersonIndex < totalPersons - 1
+                    ? `Siguiente → ${getPersonLabel(servicePersonIndex + 1, familyWho, appointmentType)}`
+                    : 'Elegir horario'
+                }
+                onPress={goToNextPersonOrSchedule}
+                disabled={currentPersonServiceIds.length === 0 || servicesLoading}
               />
-              <SecondaryAction label="Regresar" onPress={goToDetails} />
+              <SecondaryAction
+                label={servicePersonIndex === 0 ? 'Regresar' : `← ${getPersonLabel(servicePersonIndex - 1, familyWho, appointmentType)}`}
+                onPress={goBackInServiceWizard}
+              />
             </WizardCard>
           ) : null}
 
@@ -533,7 +657,7 @@ export default function MiniAppBookingScreen() {
                 onPress={goToConfirm}
                 disabled={!selectedSlotStartAt || availabilityLoading}
               />
-              <SecondaryAction label="Cambiar servicio" onPress={() => setStep('service')} />
+              <SecondaryAction label="Cambiar servicios" onPress={goBackToLastServicePerson} />
             </WizardCard>
           ) : null}
 
@@ -548,7 +672,17 @@ export default function MiniAppBookingScreen() {
                     value={`${familyWho === 'papa_hijos' ? 'Papá + ' : ''}${childCount} hijo${childCount > 1 ? 's' : ''}`}
                   />
                 ) : null}
-                <ConfirmRow label="Servicio" value={selectedService?.name ?? 'Sin elegir'} />
+                {servicesPerPerson.map((ids, i) => (
+                  <ConfirmRow
+                    key={i}
+                    label={getPersonLabel(i, familyWho, appointmentType)}
+                    value={
+                      ids.length > 0
+                        ? ids.map((id) => services.find((s) => s.id === id)?.name ?? id).join(', ')
+                        : 'Sin elegir'
+                    }
+                  />
+                ))}
                 <ConfirmRow label="Día" value={formatDayLong(selectedDate)} />
                 <ConfirmRow label="Hora" value={selectedSlot ? formatTimeLabel(selectedSlot.slotStartAt) : 'Sin elegir'} />
               </View>
@@ -914,13 +1048,68 @@ const styles = StyleSheet.create({
   },
   optionStack: { gap: spacing.sm },
   serviceCard: {
-    minHeight: 86,
+    minHeight: 72,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.gray300,
     backgroundColor: colors.gray50,
     padding: spacing.lg,
     gap: spacing.xs,
+  },
+  serviceCardSelected: {
+    backgroundColor: colors.gold + '22',
+    borderColor: colors.goldDark,
+    borderWidth: 2,
+  },
+  serviceCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.gray400,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.xs,
+  },
+  serviceCheckboxActive: {
+    backgroundColor: colors.gold,
+    borderColor: colors.goldDark,
+  },
+  selectionSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gold + '18',
+    borderRadius: radii.md,
+    padding: spacing.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.goldDark,
+  },
+  selectionSummaryText: {
+    ...typography.caption,
+    color: colors.goldDark,
+    fontWeight: '700' as const,
+  },
+  personProgressRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  personProgressDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.gray300,
+  },
+  personProgressDotDone: {
+    backgroundColor: colors.goldDark,
+  },
+  personProgressDotActive: {
+    backgroundColor: colors.gold,
+    width: 28,
+    borderRadius: 5,
   },
   serviceHeader: {
     flexDirection: 'row',
@@ -939,12 +1128,6 @@ const styles = StyleSheet.create({
   servicePrice: {
     ...typography.subtitle,
     color: colors.goldDark,
-  },
-  serviceCheckBadge: {
-    ...typography.caption,
-    color: colors.black,
-    fontWeight: '700' as const,
-    marginTop: spacing.xs,
   },
   selectedCard: {
     backgroundColor: colors.gold,

@@ -116,6 +116,16 @@ export default function SplashScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.gold} />
         </TouchableOpacity>
 
+        {/* Owner access — temporary until auth gate is implemented */}
+        <TouchableOpacity
+          style={styles.ownerButton}
+          onPress={() => router.replace('/(owner)/dashboard')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="key-outline" size={16} color={colors.gray500} />
+          <Text style={styles.ownerButtonText}>Acceso propietario</Text>
+        </TouchableOpacity>
+
       </Animated.View>
 
       {/* ── Trust badge ── */}
@@ -277,8 +287,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   // Trust badge
-  trustBadge: {
-    flexDirection: 'row',
+  trustBadge: {    flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     marginHorizontal: spacing.lg,
@@ -292,4 +301,19 @@ const styles = StyleSheet.create({
   trustTextBlock: { flex: 1 },
   trustTitle: { ...typography.subtitle, color: colors.white, fontSize: 14 },
   trustDesc: { ...typography.caption, color: colors.gray500, marginTop: 2 },
+
+  // Owner access button (temporary, pre-auth)
+  ownerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  ownerButtonText: {
+    ...typography.caption,
+    color: colors.gray500,
+    textDecorationLine: 'underline',
+  },
 });

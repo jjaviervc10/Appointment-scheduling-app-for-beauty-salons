@@ -1,1044 +1,446 @@
 ===============================================================================
-PROMPT PARA BACKEND — MÓDULO DE MENSAJES / INBOUND WHATSAPP
-JAQUELINA LÓPEZ BARBER STUDIO
+PROMPT PARA BACKEND - DIAGNOSTICO Y ACTIVACION DE ENVIO REAL WHATSAPP
+JAQUELINA LOPEZ BARBER STUDIO
 ===============================================================================
 
-Eres un experto en backend Node.js + Express + Supabase/PostgreSQL. Estamos
-desarrollando la app de agendamiento para Jaquelina López Barber Studio.
+Actua como experto backend Node.js + Express + Supabase/PostgreSQL + WhatsApp
+Cloud API. Necesito diagnosticar y corregir la entrega real de mensajes de
+WhatsApp para el flujo de citas.
 
-El backend ya existe y funciona. Necesito que me ayudes a diseñar y/o
-implementar la extensión del módulo de mensajes para contemplar tres flujos
-de comunicación inbound (mensajes que llegan al WhatsApp del negocio desde
-clientes) que actualmente NO están expuestos al frontend.
+Contexto actual:
 
-===============================================================================
-1. CONTEXTO DEL PROYECTO
-===============================================================================
-
-- App: React Native + Expo SDK 54 + TypeScript + expo-router
-- Backend: Node.js + Express (corriendo en localhost:3000 en desarrollo)
-- Base de datos: Supabase — schema: `booking`
-- Auth owner: Bearer token estático (OWNER_SECRET) para endpoints privados
-- Auth public: sin token (endpoints públicos para clientes anónimos)
-- WhatsApp: simulado actualmente. El canal existe, el webhook existe, pero
-  el envío real todavía no está conectado.
-- Estado actual: MVP funcional con datos reales. Fase de mensajería marcada
-  como "Fase futura" en business-rules.md, pero ya hay infraestructura en DB.
+- Frontend: React Native + Expo SDK 54 + TypeScript + expo-router.
+- Backend: Node.js + Express desplegado en Railway.
+- Base de datos: Supabase, schema `booking`.
+- Frontend publicado: https://barberjaquelinalopezstudio.netlify.app
+- Backend Railway: https://striking-caring-production.up.railway.app
+- Owner endpoints usan `Authorization: Bearer <OWNER_SECRET>`.
+- Public endpoints no usan bearer token.
 
 ===============================================================================
-2. INFRAESTRUCTURA DE DB YA EXISTENTE (no hay que crearla)
+1. PROBLEMA DETECTADO EN QA
 ===============================================================================
 
-### Tablas relevantes en schema `booking`:
+Se realizo una prueba real:
 
-  outbound_messages
-    — Mensajes que el sistema envía al cliente (notificaciones, confirmaciones,
-      recordatorios, resultados de aprobación, etc.)
-    — El frontend actual ya consume GET /api/owner/messages que lee de aquí.
+- Cliente: Javivi
+- Telefono: +526143278357
+- Servicio: Corte clasico
+- Cita creada desde mini app publica.
+- Luego se aprobo la cita simulando ser owner.
 
-  inbound_messages
-    — Mensajes que el cliente envía al WhatsApp del negocio (texto libre).
-    — Actualmente se registran pero NO hay endpoint que los exponga al owner.
-    — Tienen un campo `intent` clasificado automáticamente por el trigger
-      `set_inbound_message_intent()` antes del INSERT.
+Resultado observado en backend:
 
-  notification_events
-    — Cola de eventos de notificación pendientes de procesar.
-    — event_type: appointment_requested, appointment_approved,
-      appointment_rejected, appointment_client_confirmed,
-      appointment_client_cancelled, appointment_owner_cancelled,
-      appointment_reschedule_required, incident_created,
-      incident_clients_notification_due
+1. La cita SI existe.
+2. La cita SI cambio a:
 
-### Enums relevantes:
+   confirmed_by_owner
 
-  inbound_message_intent:
-    booking, reschedule, cancel, confirm, availability, late, location,
-    price, hours, human_help, greeting, thanks, unknown
+3. El backend SI genero mensajes en `booking.outbound_messages`:
 
-  notification_event_type: (ver arriba)
+   a) messageType = confirmation
+      body = "Hola Javivi, recibimos tu solicitud de cita para Corte clasico..."
+      status = pending
+      sentAt = null
+      deliveredAt = null
 
-  message_delivery_status: (pendiente de verificar valores exactos en DB)
+   b) messageType = owner_approval_result
+      body = "Hola Javivi, tu cita para Corte clasico fue aprobada. Por favor confirma tu asistencia."
+      status = pending
+      sentAt = null
+      deliveredAt = null
 
-### RPCs disponibles:
+4. El cliente NO recibio mensaje en su WhatsApp personal.
 
-  detect_inbound_intent(p_body text)
-    → TABLE(intent, confidence, matched_keywords, needs_human_review, normalized_body)
-    Clasifica el texto por regex. Nunca usa IA.
+Diagnostico frontend/QA:
 
-  normalize_inbound_text(p_text text) → text
-    Minúsculas + sin tildes + trim + colapsa espacios.
-
-===============================================================================
-3. PROBLEMA ACTUAL EN EL FRONTEND
-===============================================================================
-
-El endpoint GET /api/owner/messages devuelve TODOS los mensajes de
-outbound_messages sin filtrar. Esto incluye mensajes tipo `general` que son
-auto-respuestas del bot del WhatsApp del negocio (bienvenidas, menús de
-opciones, respuestas fallback).
-
-En el frontend ya aplicamos un filtro cliente-side para excluir messageType
-=== 'general' y mostrar solo notificaciones ligadas a citas. Pero hay tres
-flujos de comunicación inbound del cliente que el owner NUNCA ve:
-
-  (A) El cliente escribe por WhatsApp solicitando una cita (intent: booking)
-  (B) El cliente escribe por WhatsApp para pedir hablar con una persona
-      real — opción 5 del menú del bot (intent: human_help)
-  (C) El cliente escribe por WhatsApp solicitando un cambio de cita
-      (intent: reschedule o cancel)
-
-Estos tres casos quedan registrados en inbound_messages con su intent
-clasificado, pero el owner no tiene forma de verlos en la app.
+- La app esta generando correctamente la cita y el mensaje en cola.
+- El problema esta en la entrega real de WhatsApp.
+- Los mensajes quedan en `pending`, no pasan a `sent`, `delivered`, `read` ni `failed`.
+- Es probable que Railway tenga `WHATSAPP_DRY_RUN=true`, falte worker de envio,
+  falten credenciales de WhatsApp Cloud API, o el telefono no este permitido en
+  modo test.
 
 ===============================================================================
-4. LO QUE NECESITO QUE DISEÑES / IMPLEMENTES
+2. LO QUE NECESITO QUE VERIFIQUES EN BACKEND / RAILWAY
 ===============================================================================
 
-### 4.1 — Nuevo endpoint: GET /api/owner/inbound-messages
+Confirma el valor real de estas variables en Railway:
 
-Exposición de la tabla inbound_messages filtrable por intent.
+```txt
+WHATSAPP_DRY_RUN
+WHATSAPP_MODE
+WHATSAPP_ALLOWED_TEST_PHONES
+WHATSAPP_PHONE_NUMBER_ID
+WHATSAPP_ACCESS_TOKEN
+WHATSAPP_VERIFY_TOKEN
+MINIAPP_BASE_URL
+CORS_ORIGIN
+```
+
+Tambien confirma:
+
+1. Si existe un worker/proceso que lea `booking.outbound_messages` con
+   `delivery_status = 'pending'` y llame a WhatsApp Cloud API.
+
+2. Si el webhook solo guarda inbound/outbound pero NO envia mensajes pendientes.
+
+3. Si en modo `WHATSAPP_DRY_RUN=true` el comportamiento esperado es exactamente:
+
+   - crear outbound_message
+   - dejarlo en pending
+   - no llamar a Cloud API
+   - no llenar sent_at/delivered_at
+
+4. Si en modo test el numero `+526143278357` debe estar en
+   `WHATSAPP_ALLOWED_TEST_PHONES`.
+
+5. Si Meta requiere que el numero de prueba haya iniciado conversacion o este
+   permitido como destinatario en WhatsApp Cloud API test mode.
+
+===============================================================================
+3. COMPORTAMIENTO ESPERADO AL APROBAR UNA CITA
+===============================================================================
+
+Cuando el owner aprueba una cita:
+
+Endpoint:
+
+```http
+POST /api/owner/appointments/:id/approve
+Authorization: Bearer <OWNER_SECRET>
+```
+
+Backend debe:
+
+1. Cambiar cita a:
+
+```txt
+confirmed_by_owner
+```
+
+2. Crear `outbound_messages`:
+
+```txt
+message_type = owner_approval_result
+delivery_status = pending
+client_id = cliente de la cita
+appointment_id = cita aprobada
+body = "Hola {{nombre}}, tu cita para {{servicio}} fue aprobada. Por favor confirma tu asistencia."
+```
+
+3. Si envio real esta activo:
+
+   - Enviar mensaje por WhatsApp Cloud API.
+   - Cambiar delivery_status segun resultado:
+
+```txt
+queued | sent | delivered | read | failed
+```
+
+   - Guardar:
+
+```txt
+sent_at
+delivered_at
+failed_at
+failure_reason
+provider_message_id / wa_message_id si existe columna
+```
+
+4. Si envio real NO esta activo:
+
+   - Debe quedar claro en logs y configuracion que esta en dry-run.
+   - El frontend vera `pending`, lo cual es correcto para auditoria pero NO
+     significa enviado al cliente.
+
+===============================================================================
+4. PREGUNTAS CONCRETAS QUE NECESITO QUE RESPONDAS
+===============================================================================
+
+P1. En Railway, cual es el valor actual de `WHATSAPP_DRY_RUN`?
+
+P2. En Railway, cual es el valor actual de `WHATSAPP_MODE`?
+
+P3. El numero `+526143278357` esta permitido para pruebas en
+    `WHATSAPP_ALLOWED_TEST_PHONES`?
+
+P4. Existe actualmente un worker o job que procese mensajes pendientes de
+    `booking.outbound_messages`?
+
+P5. Si existe, cada cuanto corre y que logs produce?
+
+P6. Si no existe, que endpoint/worker debemos agregar para enviar mensajes
+    pendientes?
+
+P7. El backend envia el WhatsApp inmediatamente al crear `outbound_messages`,
+    o solo lo deja en cola?
+
+P8. Que columna guarda el id del mensaje devuelto por Meta WhatsApp Cloud API?
+    Si no existe, indicar migracion SQL necesaria.
+
+P9. Que errores devuelve Meta si el numero no esta permitido, el token es
+    invalido, o el phone_number_id es incorrecto?
+
+P10. Existe endpoint owner para reintentar mensajes pending o solo failed?
+
+===============================================================================
+5. IMPLEMENTACION SOLICITADA SI FALTA EL ENVIO REAL
+===============================================================================
+
+Si hoy NO existe envio real de WhatsApp para `outbound_messages.pending`,
+implementa una de estas opciones y explica cual elegiste:
+
+-------------------------------------------------------------------------------
+OPCION A - ENVIO INMEDIATO
+-------------------------------------------------------------------------------
+
+Cuando una accion crea un `outbound_message`, llamar inmediatamente a WhatsApp
+Cloud API si:
+
+```txt
+WHATSAPP_DRY_RUN=false
+```
+
+Luego actualizar el mensaje:
+
+```txt
+delivery_status = sent | failed
+sent_at = now() si fue aceptado por Meta
+failed_at = now() si fallo
+failure_reason = error seguro
+provider_message_id = id devuelto por Meta
+```
+
+-------------------------------------------------------------------------------
+OPCION B - WORKER DE COLA
+-------------------------------------------------------------------------------
+
+Crear worker/job que procese:
+
+```sql
+SELECT *
+FROM booking.outbound_messages
+WHERE delivery_status IN ('pending', 'queued')
+ORDER BY created_at ASC
+LIMIT 20;
+```
+
+Por cada mensaje:
+
+1. Marcar como `queued`.
+2. Enviar a WhatsApp Cloud API.
+3. Marcar como `sent` o `failed`.
+4. Guardar error seguro en `failure_reason`.
 
 Requisitos:
-- Auth: Bearer owner (OWNER_SECRET)
-- Query params opcionales:
-    intent: uno de los valores del enum inbound_message_intent
-    needs_human_review: boolean — para filtrar los que el bot marcó como
-      "requiere atención humana"
-    read: boolean — para filtrar leídos/no leídos (si la tabla lo soporta)
-    page: número de página (default: 1)
-    limit: registros por página (default: 20)
-- Response shape esperado:
-    {
-      ok: true,
-      data: [
-        {
-          id: string,
-          channel: string,           // 'whatsapp' u otro
-          body: string,              // texto que escribió el cliente
-          intent: inbound_message_intent,
-          confidence: number,        // 0-1, qué tan seguro está el clasificador
-          needs_human_review: boolean,
-          normalized_body: string,
-          client: {
-            id: string,
-            fullName: string,
-            phone: string
-          } | null,
-          appointment: {             // si el intent está ligado a una cita
-            id: string,
-            requestedStartAt: string,
-            serviceName: string
-          } | null,
-          receivedAt: string,        // ISO timestamp
-          readAt: string | null      // null si aún no fue leído
-        }
-      ],
-      total: number,
-      summary: {
-        total: number,
-        needsHumanReview: number,    // cuántos requieren atención
-        unread: number,              // cuántos no han sido vistos por el owner
-        byIntent: {                  // conteo agrupado por intent
-          booking: number,
-          reschedule: number,
-          cancel: number,
-          human_help: number,
-          unknown: number,
-          // ... resto de intents
-        }
-      }
-    }
 
-### 4.2 — Endpoint: PATCH /api/owner/inbound-messages/:id/read
-
-Marcar un mensaje inbound como leído por el owner.
-
-Requisitos:
-- Auth: Bearer owner
-- Actualiza readAt = now() en el registro
-- Response: { ok: true, message: { id, readAt } }
-
-### 4.3 — Endpoint: POST /api/owner/inbound-messages/:id/link-appointment
-
-(Opcional / Nice-to-have si la DB lo permite)
-Vincular manualmente un mensaje inbound con una cita existente.
-Útil cuando el cliente escribe "quiero cambiar mi cita del martes" y el
-owner necesita associarlo al appointment correcto.
-
-Requisitos:
-- Auth: Bearer owner
-- Body: { appointmentId: string }
-- Response: { ok: true, message: { id, appointmentId } }
-
-### 4.4 — Verificar: ¿el webhook de WhatsApp ya escribe en inbound_messages?
-
-Necesito saber si el webhook que recibe mensajes del WhatsApp del negocio
-ya registra en inbound_messages con todos los campos que describí en 4.1,
-o si hay campos faltantes que habría que agregar (readAt, confidence,
-needs_human_review, normalized_body como columnas persistidas o calculadas
-en el momento del GET).
+- No duplicar envios.
+- Respetar dedupe existente.
+- No romper `WHATSAPP_DRY_RUN=true`.
+- Logs claros por message_id, client_id, phone, message_type.
 
 ===============================================================================
-5. REGLAS DE NEGOCIO A RESPETAR
+6. ENDPOINT DE DIAGNOSTICO SOLICITADO
 ===============================================================================
 
-- Solo el owner puede leer inbound_messages (RLS o validación en API).
-- Los mensajes con intent `greeting` y `thanks` son de bajo valor —
-  sugerimos NO incluirlos en el conteo de needsHumanReview, pero sí
-  devolverlos si se pide filtrar por ese intent explícitamente.
-- Los mensajes con intent `human_help` o `unknown` con confidence < 0.5
-  deben marcarse siempre como needs_human_review = true.
-- Un mensaje inbound puede o no estar vinculado a un client_id (si el
-  cliente escribe desde un número no registrado, client_id puede ser null).
-- No implementar respuestas automáticas nuevas en este sprint — solo
-  exposición de lectura al owner.
+Agregar o proponer endpoint owner para diagnostico:
 
-===============================================================================
-6. PREGUNTAS ESPECÍFICAS PARA EL BACKEND
-===============================================================================
+```http
+GET /api/owner/messages/diagnostics
+Authorization: Bearer <OWNER_SECRET>
+```
 
-  P1: ¿La tabla inbound_messages ya tiene columnas readAt y needs_human_review
-      como campos persistidos, o solo se calculan desde el trigger?
+Response esperada:
 
-  P2: ¿El campo confidence (nivel de certeza del clasificador de intents)
-      se guarda en inbound_messages o solo lo devuelve la RPC
-      detect_inbound_intent() en tiempo de ejecución?
-
-  P3: ¿Hay algún índice en inbound_messages.intent para que los filtros
-      por intent sean eficientes, o hay que crearlo?
-
-  P4: ¿El webhook de WhatsApp ya vincula automáticamente el client_id
-      usando el número de teléfono del mensaje entrante, buscando en la
-      tabla clients por phone?
-
-  P5: ¿Hay algún endpoint existente que ya exponga inbound_messages de
-      alguna forma, aunque sea parcial, para no duplicar lógica?
-
-  P6: ¿Cuál es el nombre real de la columna del timestamp de recepción del
-      mensaje inbound — es received_at, created_at, o algo distinto?
-
-===============================================================================
-7. CONTEXTO DEL FRONTEND (para que el contrato sea coherente)
-===============================================================================
-
-El frontend (React Native + Expo) ya tiene:
-  - src/types/messages.ts  → tipos TypeScript para OwnerMessage (outbound)
-  - src/services/ownerApi.ts → función getOwnerMessages()
-  - app/(owner)/messages.tsx → pantalla de mensajes del owner
-
-Lo que vamos a agregar en el frontend una vez tengas el contrato del backend:
-  - Tipo OwnerInboundMessage en messages.ts
-  - Función getOwnerInboundMessages() en ownerApi.ts
-  - Una segunda sección (o tab) dentro de la pantalla messages.tsx con:
-      · Tab "Enviados" — notificaciones outbound (lo que ya existe)
-      · Tab "Recibidos" — mensajes inbound del cliente (lo nuevo)
-        Dentro de "Recibidos", filtros por:
-          · Todos
-          · Requieren atención (needs_human_review = true)
-          · Solicitudes de cita (intent: booking)
-          · Reprogramaciones (intent: reschedule | cancel)
-          · Hablar con el estudio (intent: human_help)
-
-===============================================================================
-8. ENTREGABLES QUE ESPERO DE TI
-===============================================================================
-
-  [ ] Confirmación o corrección de la shape real de inbound_messages en DB
-  [ ] Implementación de GET /api/owner/inbound-messages con filtros y summary
-  [ ] Implementación de PATCH /api/owner/inbound-messages/:id/read
-  [ ] Respuesta a las 6 preguntas de la sección 6
-  [ ] Si faltan columnas en DB (readAt, confidence, etc.), dime la migración
-      SQL necesaria para agregarlas al schema `booking`
-  [ ] Contrato JSON final (request + response) listo para que el frontend
-      lo typee en TypeScript
-
-===============================================================================
-FIN DEL PROMPT v1
-===============================================================================
-
-
-===============================================================================
-PROMPT ADICIONAL v2 — NORMALIZACIÓN DE INTENTS + CAMPO bot_replied
-JAQUELINA LÓPEZ BARBER STUDIO — Mayo 2026
-===============================================================================
-
-Este prompt extiende el anterior. Los tres endpoints ya fueron implementados.
-Ahora hay dos nuevos requerimientos detectados desde el frontend:
-
--------------------------------------------------------------------------------
-REQUERIMIENTO A — Ampliar el diccionario de normalización de intents
--------------------------------------------------------------------------------
-
-El RPC detect_inbound_intent() y/o la función normalize_inbound_text() deben
-reconocer correctamente los siguientes patrones de mensajes reales que están
-llegando al WhatsApp del negocio y que actualmente caen como `unknown` o se
-clasifican con baja confidence:
-
-### Grupo 1 — Saludos (intent: `greeting`)
-Estos mensajes deben clasificarse como `greeting` con alta confidence.
-El sistema YA DEBERÍA responderles automáticamente con un saludo y el menú.
-
-  Ejemplos reales detectados:
-    "Hola buen dia"
-    "Como estas Jaque?"
-    "Como estas?"
-    "Que tal"
-    "Buen dia"
-    "Holaaa"
-    "Buenos dias"
-    "Buenas tardes"
-    "Buenas noches"
-    "Hola, como estan"
-    "Hola! buenos dias"
-    "Ey hola"
-    "Hey"
-
-  Patrones normalizados a agregar al diccionario:
-    /^(hola|ola|buenas|buenos dias|buen dia|buenas tardes|buenas noches|que tal|como estas|como estan|como te va|ey|hey|oye)[\s!?.,]*/
-    Variaciones con doble letra: "holaaa", "holaa", "buenass", etc.
-
-### Grupo 2 — Preguntas generales / dudas (intent: `human_help` con confidence media)
-Estos mensajes indican que el cliente necesita hablar con alguien, pero no
-necesariamente son urgentes. El bot puede responder con el menú y opción de
-contacto.
-
-  Ejemplos reales:
-    "Tengo dudas"
-    "Tengo una pregunta"
-    "Necesito información"
-    "Necesito info"
-    "Quiero saber algo"
-    "Me puede ayudar"
-    "Buenas, tengo una consulta"
-
-  Recomendación: intent = `human_help`, confidence = 0.6-0.7, needs_human_review = false
-  (el bot puede responder con el menú de opciones; no requiere atención humana)
-
-### Grupo 3 — Solicitud explícita de hablar con persona (intent: `human_help` urgente)
-Estos mensajes SÍ requieren atención humana real. needs_human_review = true.
-
-  Ejemplos:
-    "Hablar con el estudio"
-    "Hablar con alguien"
-    "Necesito hablar con una persona"
-    "Me comunican con Jaquelina"
-    "Quiero hablar con el dueño"
-    "Necesito que me llamen"
-    "Opcion 5" (o simplemente "5" si es la opción del menú)
-
--------------------------------------------------------------------------------
-REQUERIMIENTO B — Nuevo campo `bot_replied` en inbound_messages
--------------------------------------------------------------------------------
-
-### Problema detectado en frontend:
-
-El frontend muestra la etiqueta "Requiere atención del estudio" en ROJO para
-TODOS los mensajes donde needs_human_review = true. Esto confunde al dueño
-porque ve mensajes de saludo ("Hola buen dia") en rojo, cuando en realidad
-el sistema ya les respondió automáticamente y no hay nada que hacer.
-
-La etiqueta roja debería aparecer SOLO cuando el sistema NO pudo responder
-y genuinamente necesita intervención humana.
-
-### Solución solicitada:
-
-1. Agregar campo `bot_replied_at` (timestamp) a la tabla `inbound_messages`.
-   Si es null → el bot NO respondió a este mensaje.
-   Si tiene valor → el bot sí respondió automáticamente en esa fecha/hora.
-
-   Migración sugerida:
-   ```sql
-   ALTER TABLE booking.inbound_messages
-     ADD COLUMN IF NOT EXISTS bot_replied_at timestamptz DEFAULT NULL,
-     ADD COLUMN IF NOT EXISTS outbound_message_id uuid REFERENCES booking.outbound_messages(id) DEFAULT NULL;
-   ```
-
-2. Cuando el bot envíe una respuesta automática a un mensaje inbound, el
-   webhook/handler debe actualizar `bot_replied_at = now()` y
-   `outbound_message_id` = el id del outbound_message generado.
-
-3. El endpoint GET /api/owner/inbound-messages debe incluir estos campos en
-   el response de cada mensaje:
-
-   ```json
-   {
-     "id": "...",
-     "botReplied": true,          // bot_replied_at IS NOT NULL
-     "botRepliedAt": "2026-05-09T14:32:11Z",  // o null
-     "outboundMessageId": "uuid o null",
-     ... resto de campos existentes
-   }
-   ```
-
-### Lógica de needs_human_review corregida:
-
-La lógica actual debe refinarse. Propuesta:
-
-  | intent       | confidence | bot_replied_at | needs_human_review correcto |
-  |--------------|------------|----------------|-----------------------------|
-  | greeting     | alta       | con valor      | FALSE                       |
-  | thanks       | alta       | con valor      | FALSE                       |
-  | hours        | alta       | con valor      | FALSE                       |
-  | location     | alta       | con valor      | FALSE                       |
-  | price        | alta       | con valor      | FALSE                       |
-  | availability | alta       | con valor      | FALSE                       |
-  | human_help   | cualquiera | null           | TRUE                        |
-  | human_help   | cualquiera | con valor      | FALSE (bot ya respondió)    |
-  | unknown      | < 0.5      | null           | TRUE                        |
-  | booking      | cualquiera | null           | TRUE (cita no procesada)    |
-  | reschedule   | cualquiera | null           | TRUE (cambio no procesado)  |
-  | cancel       | cualquiera | null           | TRUE (cancelación pendiente)|
-
-En resumen: needs_human_review = true SOLO cuando:
-  - El bot no pudo responder (bot_replied_at IS NULL) Y
-  - El intent requiere acción humana (no es greeting/thanks/hours/location/price)
-
--------------------------------------------------------------------------------
-REQUERIMIENTO C — Cómo debe verse en el frontend (referencia para el backend)
--------------------------------------------------------------------------------
-
-El frontend ya fue actualizado para usar el campo `botReplied`:
-
-  botReplied = true  → banner VERDE "Respondida automáticamente por el sistema"
-  botReplied = false → banner ROJO "Requiere atención del estudio"
-  botReplied = null  → fallback: si needs_human_review=true → rojo, sino sin banner
-
-Esto significa que el backend DEBE enviar `botReplied` como boolean derivado
-de si bot_replied_at IS NOT NULL, no como campo directo nullable.
-
-Response shape actualizado (campos nuevos en negrita):
-
-  ```json
-  {
-    "id": "uuid",
-    "channel": "whatsapp",
-    "fromPhone": "+521...",
-    "body": "Hola buen dia",
-    "intent": "greeting",
-    "confidence": 0.95,
-    "needs_human_review": false,
-    "normalized_body": "hola buen dia",
-    "botReplied": true,
-    "botRepliedAt": "2026-05-09T10:15:00Z",
-    "outboundMessageId": "uuid-del-mensaje-de-respuesta",
-    "client": { ... } | null,
-    "appointment": { ... } | null,
-    "receivedAt": "2026-05-09T10:14:55Z",
-    "readAt": null
+```json
+{
+  "ok": true,
+  "whatsapp": {
+    "dryRun": true,
+    "mode": "test",
+    "phoneNumberIdConfigured": true,
+    "accessTokenConfigured": true,
+    "allowedTestPhonesCount": 1,
+    "miniAppBaseUrl": "https://barberjaquelinalopezstudio.netlify.app/miniapp"
+  },
+  "queue": {
+    "pending": 2,
+    "queued": 0,
+    "sent": 0,
+    "delivered": 0,
+    "read": 0,
+    "failed": 0
   }
-  ```
+}
+```
 
--------------------------------------------------------------------------------
-ENTREGABLES DE ESTA ITERACIÓN (v2)
--------------------------------------------------------------------------------
-
-  [ ] Migración SQL: ALTER TABLE inbound_messages para agregar bot_replied_at
-      y outbound_message_id (si no existe ya)
-
-  [ ] Actualizar el webhook/handler de WhatsApp para que cuando se envíe una
-      respuesta automática a un mensaje inbound, actualice bot_replied_at en
-      el registro correspondiente de inbound_messages.
-
-  [ ] Actualizar GET /api/owner/inbound-messages para incluir botReplied
-      (boolean: bot_replied_at IS NOT NULL) y botRepliedAt en cada objeto.
-
-  [ ] Ampliar el diccionario de detect_inbound_intent() con los patrones de
-      los 3 grupos del Requerimiento A.
-
-  [ ] Revisar y corregir la lógica de needs_human_review según la tabla del
-      Requerimiento B para mensajes que el bot ya procesó y respondió.
-
-  [ ] Confirmación del listado de intents que el bot SIEMPRE puede responder
-      automáticamente sin necesidad de atención humana.
+No devolver secretos reales. Solo booleanos o conteos.
 
 ===============================================================================
-FIN DEL PROMPT v2
+7. REINTENTO DE MENSAJES
 ===============================================================================
 
+Actualmente existe:
+
+```http
+POST /api/owner/messages/:id/retry
+```
+
+Necesito confirmar si solo permite `failed -> queued`.
+
+QA solicita una opcion segura para mensajes `pending` que nunca fueron enviados
+por estar en dry-run:
+
+```http
+POST /api/owner/messages/:id/send-now
+```
+
+o ampliar retry para permitir:
+
+```txt
+pending -> queued -> sent/failed
+```
+
+Solo debe funcionar si:
+
+```txt
+WHATSAPP_DRY_RUN=false
+```
+
+Si dry-run esta activo, responder 422:
+
+```json
+{
+  "ok": false,
+  "error": "WhatsApp dry-run activo. El mensaje no se enviara realmente."
+}
+```
 
 ===============================================================================
-PROMPT ADICIONAL v3 — ENDPOINTS FALTANTES (QA AUDIT FRONTEND)
-FECHA: Mayo 2026
+8. OPCION 5 - CITA DE EMERGENCIA / LLAMADA DIRECTA
 ===============================================================================
 
-El frontend completó una auditoría QA completa y detectó tres grupos de
-endpoints que no existen todavía en el backend. A continuación se describen
-con exactitud para que los implementes.
+El menu WhatsApp actual define:
+
+```txt
+5. Cita de emergencia / llamada directa
+```
+
+Cuando el cliente escribe:
+
+```txt
+5
+opcion 5
+emergencia
+cita de emergencia
+urgencia
+llamar
+llamar ahora
+```
+
+Backend debe guardar inbound:
+
+```json
+{
+  "parsed_intent": "human_help",
+  "matched_keywords": ["emergency_call"],
+  "needs_human_review": true,
+  "metadata": {
+    "action": "emergency_call",
+    "urgency": "high",
+    "channel": "whatsapp"
+  },
+  "bot_replied_at": "timestamp-si-el-bot-respondio",
+  "outbound_message_id": "uuid-del-outbound-automatico"
+}
+```
+
+Respuesta automatica esperada:
+
+```txt
+Entiendo que necesitas una cita de emergencia.
+
+Por favor usa esta opcion solo si realmente lo necesitas. Mis horarios son
+limitados y este espacio es para verdaderas emergencias.
+
+Puedes llamarme directamente aqui:
+{EMERGENCY_CALL_PHONE}
+
+Solo llamadas directas. No se agenda por la app.
+```
+
+Confirmar:
+
+1. Variable real para el numero de emergencia:
+
+```txt
+EMERGENCY_CALL_PHONE
+```
+
+2. Que pasa si `EMERGENCY_CALL_PHONE` no esta configurado.
+
+3. Si esa respuesta automatica tambien queda en `outbound_messages.pending`
+   cuando dry-run esta activo.
+
+4. Si al activar envio real esa respuesta llegara al WhatsApp del cliente.
 
 ===============================================================================
-A. ENDPOINT: Citas en estados "en espera" (Dashboard — Panel U1)
+9. DATOS DE PRUEBA A USAR
 ===============================================================================
 
-PROBLEMA:
-  El endpoint GET /api/owner/appointments/pending solo devuelve citas con
-  status = 'pending_owner_approval'. El frontend necesita un panel adicional
-  que muestre citas que ya fueron procesadas pero están esperando confirmación
-  del cliente o requieren nueva fecha.
+Cliente de prueba:
 
-ENDPOINT NUEVO:
-  GET /api/owner/appointments/awaiting
+```txt
+Nombre: Javivi
+Telefono: +526143278357
+```
 
-  Devuelve citas con status IN:
-    - 'awaiting_client_confirmation'  (owner propuso nueva hora, cliente no ha confirmado)
-    - 'reschedule_required'            (marcada para reprogramar, sin nueva hora asignada)
+Cita observada:
 
-  Response (mismo formato que /pending):
-  {
-    "ok": true,
-    "data": [
-      {
-        "id": "uuid",
-        "status": "awaiting_client_confirmation" | "reschedule_required",
-        "requested_start_at": "ISO 8601",
-        "requested_end_at": "ISO 8601",
-        "notes": null | string,
-        "cancellation_reason": null | string,
-        "created_at": "ISO 8601",
-        "clients": { "id": "uuid", "full_name": string, "phone": string } | null,
-        "services": { "id": "uuid", "name": string, "duration_minutes": number } | null
-      }
-    ]
-  }
+```txt
+appointment_id: bb85a662-b2fa-4cf7-a10f-6f8c26f6ba04
+status: confirmed_by_owner
+service: Corte clasico
+requested_start_at: 2026-05-10T17:55:00-06:00
+```
 
-  Auth: Bearer OWNER_SECRET requerido.
-  Sin paginación (misma lógica que /pending).
-  Ordenar por requested_start_at ASC.
+Mensajes observados:
 
-USO EN FRONTEND:
-  El dashboard llamará este endpoint al cargar y mostrará un segundo panel
-  "En espera de confirmación" separado del panel de "Solicitudes pendientes".
+```txt
+confirmation:
+  id: 51daaa98-e233-400f-98fe-4cf0d433759f
+  status: pending
+
+owner_approval_result:
+  id: d958ffc1-a6b3-4c1d-8092-62576edcc71e
+  status: pending
+```
+
+Usar esos IDs para investigar por que no se enviaron.
 
 ===============================================================================
-B. ENDPOINT: Configuración del negocio (Settings screen — C3)
+10. ENTREGABLES ESPERADOS
 ===============================================================================
 
-PROBLEMA:
-  La pantalla de Ajustes (app/(owner)/settings.tsx) tiene campos de
-  configuración que actualmente son solo estado local — nunca persisten.
-  No hay ningún endpoint de settings en el backend.
+Devuelve:
 
-ENDPOINTS NECESARIOS:
+1. Diagnostico exacto de por que los mensajes estan en `pending`.
+2. Valores actuales de configuracion WhatsApp sin exponer secretos.
+3. Confirmacion de si existe worker/envio real.
+4. Cambios de backend necesarios para que el cliente reciba WhatsApp real.
+5. Migracion SQL si falta columna para provider message id o metadata.
+6. Endpoint o job implementado para enviar/reintentar mensajes.
+7. Logs esperados para una prueba exitosa.
+8. Pasos exactos para probar con `+526143278357`.
+9. Respuesta de que debe ver el frontend en pantalla Mensajes:
 
-  GET /api/owner/settings
-    Devuelve la configuración actual del negocio.
-    Auth: Bearer OWNER_SECRET.
-    Response:
-    {
-      "ok": true,
-      "settings": {
-        "businessName": string,
-        "slotDurationMinutes": number,
-        "bufferMinutes": number,
-        "maxAdvanceDays": number,
-        "timezone": string
-      }
-    }
-
-  PATCH /api/owner/settings
-    Actualiza uno o más campos de configuración.
-    Auth: Bearer OWNER_SECRET.
-    Body (todos opcionales):
-    {
-      "businessName": string,
-      "slotDurationMinutes": number,   // min 15, max 240
-      "bufferMinutes": number,         // min 0, max 120
-      "maxAdvanceDays": number,        // min 1, max 365
-      "timezone": string               // IANA timezone string
-    }
-    Response:
-    {
-      "ok": true,
-      "settings": { ...mismos campos actualizados... }
-    }
-
-SUGERENCIA DE DB:
-  Tabla: booking.business_settings
-  Columnas: id (PK), business_name text, slot_duration_minutes int,
-            buffer_minutes int, max_advance_days int, timezone text,
-            updated_at timestamptz
-  Una sola fila (upsert por fila fija o singleton pattern con id=1).
-
-  Migration SQL:
-  CREATE TABLE IF NOT EXISTS booking.business_settings (
-    id SERIAL PRIMARY KEY,
-    business_name TEXT NOT NULL DEFAULT 'Mi Barber Studio',
-    slot_duration_minutes INT NOT NULL DEFAULT 45,
-    buffer_minutes INT NOT NULL DEFAULT 15,
-    max_advance_days INT NOT NULL DEFAULT 30,
-    timezone TEXT NOT NULL DEFAULT 'America/Mexico_City',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-  );
-  INSERT INTO booking.business_settings
-    (business_name, slot_duration_minutes, buffer_minutes, max_advance_days, timezone)
-  VALUES ('Jaquelina Lopez Barber Studio', 45, 15, 30, 'America/Mexico_City')
-  ON CONFLICT (id) DO NOTHING;
+   - pending = en cola/no enviado aun
+   - sent = aceptado por WhatsApp Cloud API
+   - delivered = entregado al telefono
+   - read = leido por cliente
+   - failed = fallo real de envio
 
 ===============================================================================
-C. ENDPOINT: Crear incidencia real (IncidentModal — C4)
+FIN DEL PROMPT
 ===============================================================================
-
-PROBLEMA:
-  El IncidentModal del dashboard muestra un Alert.alert de "simulación" pero
-  NUNCA llama al backend. El modelo de incidencias ya existe en la DB
-  (tabla booking.incidents), pero el endpoint de creación no está expuesto
-  al frontend owner.
-
-ENDPOINT NECESARIO:
-
-  POST /api/owner/incidents
-    Crea una incidencia operativa.
-    Auth: Bearer OWNER_SECRET.
-    Body:
-    {
-      "severity": "low" | "medium" | "high" | "emergency",
-      "reasons": string[],              // array de razones seleccionadas
-      "description": string | null,
-      "cancelAppointments": boolean,    // si true, cancela citas del día
-      "notifyClients": boolean          // si true, envía notificación WhatsApp
-    }
-    Response:
-    {
-      "ok": true,
-      "incident": {
-        "id": "uuid",
-        "severity": string,
-        "description": string | null,
-        "created_at": "ISO 8601",
-        "affectedAppointmentsCount": number
-      }
-    }
-
-  Lógica de negocio:
-  - Si cancelAppointments=true: marcar todas las citas de HOY con status
-    'owner_cancelled' y cancellation_reason = 'Incidencia: ' + reasons.join(', ')
-  - Si notifyClients=true: encolar mensajes WhatsApp a todos los clientes
-    afectados notificando la cancelación/incidencia
-  - Registrar en booking.incidents con todos los campos disponibles
-
-===============================================================================
-ENTREGABLES DE ESTA ITERACIÓN (v3)
-===============================================================================
-
-1. GET /api/owner/appointments/awaiting
-   Endpoint de citas en estados intermedios (awaiting_client_confirmation,
-   reschedule_required).
-
-2. GET /api/owner/settings + PATCH /api/owner/settings
-   CRUD de configuración del negocio con migration SQL incluida.
-
-3. POST /api/owner/incidents
-   Creación real de incidencias con lógica de cancelación y notificación.
-
-Para cada endpoint, devuelve:
-  a) El código Express del router (route handler completo)
-  b) La migration SQL si aplica
-  c) Cualquier cambio necesario al webhook o servicios auxiliares
-
-===============================================================================
-FIN DEL PROMPT v3
-===============================================================================
-
-
-===============================================================================
-PROMPT ADICIONAL v4 - QA FRONTEND: WHATSAPP MENU OPCIONES 3, 4 Y 5
-===============================================================================
-
-CONTEXTO QA:
-  El frontend fue revisado desde la superficie publica de mini app.
-  Actualmente SOLO existen estas rutas:
-
-    - /miniapp/booking
-    - /miniapp/success
-
-  Eso significa que NO contamos todavia con mini apps publicas dedicadas para
-  cuando el cliente escribe en WhatsApp las opciones 3, 4 o 5.
-
-  En el frontend owner si existen intents y acciones para:
-    - reschedule
-    - cancel
-    - human_help
-
-  Pero eso vive en el panel del estudio, no en una mini app segura para cliente.
-
-OBJETIVO:
-  Necesitamos que el backend confirme y/o implemente el contrato de WhatsApp
-  para que frontend pueda construir las mini apps publicas correctas para:
-
-    - Opcion 3
-    - Opcion 4
-    - Opcion 5
-
-PREGUNTAS QUE BACKEND DEBE RESPONDER ANTES DE FRONTEND:
-
-1. Cual es el menu real actual que se envia al cliente por WhatsApp?
-   Necesitamos el texto exacto y el significado de cada numero:
-
-     1 = ?
-     2 = ?
-     3 = ?
-     4 = ?
-     5 = ?
-
-2. Que intent debe generar cada opcion numerica?
-
-     "1" -> booking | availability | confirm | reschedule | cancel | human_help | ...
-     "2" -> booking | availability | confirm | reschedule | cancel | human_help | ...
-     "3" -> booking | availability | confirm | reschedule | cancel | human_help | ...
-     "4" -> booking | availability | confirm | reschedule | cancel | human_help | ...
-     "5" -> booking | availability | confirm | reschedule | cancel | human_help | ...
-
-3. Cuando el cliente escribe solo "3", "4" o "5", el webhook ya responde
-   automaticamente? Si si, devolver el texto exacto. Si no, implementarlo.
-
-4. El webhook puede generar links tokenizados de mini app para opciones que
-   requieren contexto de cliente/cita?
-
-   Requerimos que el link incluya:
-     - token temporal seguro
-     - phone prellenado o asociado en backend
-     - purpose: booking | availability | reschedule | cancel | human_help
-     - expires_at
-     - returnUrl o waReturnUrl opcional para volver a WhatsApp
-
-5. Como identifica backend la cita activa del cliente cuando escribe opcion 3
-   o opcion 4?
-
-   Reglas necesarias:
-     - Buscar por fromPhone normalizado.
-     - Si hay 0 citas activas: responder que no encontramos cita activa y
-       ofrecer opcion de hablar con el estudio.
-     - Si hay 1 cita activa: generar token y link directo a la mini app.
-     - Si hay varias citas activas: enviar una mini app/lista para elegir la
-       cita antes de reprogramar o cancelar.
-
-===============================================================================
-CONTRATO NECESARIO PARA OPCION 3
-===============================================================================
-
-NOTA:
-  Pendiente confirmar con backend que opcion 3 significa "reprogramar cita".
-  Si el menu actual usa otro significado, ajustar este contrato al significado
-  real.
-
-RESPUESTA WHATSAPP ESPERADA:
-
-  "Claro. Para reprogramar tu cita abre este enlace seguro:
-   {miniapp_reschedule_link}
-
-   Desde ahi podras elegir un nuevo dia y horario. Al terminar volveras a este
-   chat."
-
-MINI APP FRONTEND A CREAR:
-
-  /miniapp/reschedule?token=<token>&returnUrl=<optional>
-
-ENDPOINTS PUBLICOS NECESARIOS:
-
-  GET /api/public/miniapp-tokens/:token
-    Valida token y devuelve:
-    {
-      "ok": true,
-      "purpose": "reschedule",
-      "phone": "+52...",
-      "fullName": "Nombre",
-      "expiresAt": "ISO",
-      "appointment": {
-        "id": "uuid",
-        "serviceId": "uuid",
-        "serviceName": "Corte",
-        "startAt": "ISO",
-        "status": "confirmed_by_owner" | "client_confirmed" | "awaiting_client_confirmation" | "reschedule_required"
-      }
-    }
-
-  POST /api/public/appointments/reschedule-request
-    Body:
-    {
-      "token": "string",
-      "appointmentId": "uuid",
-      "newStartAt": "ISO",
-      "notes": "string | null"
-    }
-
-    Reglas:
-      - Validar token, purpose=reschedule, no expirado.
-      - Validar que appointmentId pertenece al telefono/token.
-      - Validar slot disponible con reglas de negocio actuales.
-      - No usar OWNER_SECRET.
-      - Devolver nuevo status esperado.
-
-    Response:
-    {
-      "ok": true,
-      "appointment": {
-        "id": "uuid",
-        "status": "awaiting_client_confirmation" | "reschedule_required",
-        "requestedStartAt": "ISO"
-      }
-    }
-
-===============================================================================
-CONTRATO NECESARIO PARA OPCION 4
-===============================================================================
-
-NOTA:
-  Pendiente confirmar con backend que opcion 4 significa "cancelar cita".
-  Si el menu actual usa otro significado, ajustar este contrato al significado
-  real.
-
-RESPUESTA WHATSAPP ESPERADA:
-
-  "Entiendo. Para cancelar tu cita abre este enlace seguro:
-   {miniapp_cancel_link}
-
-   Te pediremos confirmar antes de cancelar."
-
-MINI APP FRONTEND A CREAR:
-
-  /miniapp/cancel?token=<token>&returnUrl=<optional>
-
-ENDPOINTS PUBLICOS NECESARIOS:
-
-  GET /api/public/miniapp-tokens/:token
-    Igual que arriba, pero purpose="cancel".
-
-  POST /api/public/appointments/cancel
-    Body:
-    {
-      "token": "string",
-      "appointmentId": "uuid",
-      "reason": "string | null"
-    }
-
-    Reglas:
-      - Validar token, purpose=cancel, no expirado.
-      - Validar que appointmentId pertenece al telefono/token.
-      - Pedir confirmacion explicita en frontend antes del POST.
-      - Mover cita a client_cancelled si la regla de negocio lo permite.
-      - Crear notification_event appointment_client_cancelled.
-      - Encolar outbound WhatsApp de confirmacion si aplica.
-      - No exponer endpoints owner.
-
-    Response:
-    {
-      "ok": true,
-      "appointment": {
-        "id": "uuid",
-        "status": "client_cancelled",
-        "cancelledAt": "ISO"
-      }
-    }
-
-===============================================================================
-CONTRATO NECESARIO PARA OPCION 5
-===============================================================================
-
-NOTA:
-  En prompts actuales opcion 5 ya aparece como hablar con persona / estudio
-  (intent=human_help). No requiere mini app si el objetivo es atencion humana
-  directa, pero SI requiere respuesta automatica y registro correcto.
-
-RESPUESTA WHATSAPP ESPERADA:
-
-  "Perfecto, te conecto con el estudio. Jaquelina o alguien del equipo te
-   respondera por aqui lo antes posible."
-
-COMPORTAMIENTO BACKEND:
-
-  Cuando inbound body sea "5", "opcion 5", "hablar con alguien",
-  "hablar con el estudio", etc.:
-
-    - intent = human_help
-    - confidence alta
-    - needs_human_review = true
-    - bot_replied_at debe llenarse SOLO si el bot envio una respuesta de acuse
-    - outbound_message_id debe apuntar al mensaje automatico enviado
-    - En dashboard owner debe aparecer como "Hablar con el estudio"
-    - No debe mandar al cliente al dashboard ni a rutas owner
-
-OPCIONAL:
-  Si se decide crear una mini app para opcion 5, debe ser solo una pantalla
-  de confirmacion/contacto:
-
-    /miniapp/help?token=<token>&returnUrl=<optional>
-
-  Pero QA recomienda NO bloquear al cliente con mini app para opcion 5.
-  Lo correcto es acuse automatico + bandeja de atencion humana owner.
-
-===============================================================================
-ENTREGABLES QUE NECESITA FRONTEND
-===============================================================================
-
-1. Texto exacto del menu WhatsApp actual 1-5.
-2. Mapeo exacto numero -> intent.
-3. Textos exactos de respuesta automatica para opciones 3, 4 y 5.
-4. Definicion de si opcion 3 y 4 requieren mini app o solo respuesta chat.
-5. Endpoint para crear/validar mini_app_tokens por purpose.
-6. Endpoint publico para reprogramar con token.
-7. Endpoint publico para cancelar con token.
-8. Reglas de busqueda de cita activa por telefono.
-9. Payload exacto que el webhook guardara en inbound_messages y outbound_messages.
-10. Confirmar que links generados nunca apuntan a rutas /(owner) ni /(client).
-
-===============================================================================
-FIN DEL PROMPT v4
-===============================================================================
-
-
-===============================================================================
-PROMPT ADICIONAL v5 - CORRECCION QA OPCION 5: CITA DE EMERGENCIA / LLAMADA
-===============================================================================
-
-CORRECCION IMPORTANTE:
-  La opcion 5 NO debe asumirse automaticamente como "hablar con una persona"
-  generico si en el menu de WhatsApp corresponde a "cita de emergencia" o
-  "llamada directa".
-
-  En frontend YA existe una experiencia equivalente en la pantalla normal del
-  cliente:
-
-    app/(client)/home.tsx
-
-  La tarjeta visible dice:
-    "¿Cita de emergencia?"
-    "Toca aqui para ver descansos disponibles"
-
-  Al abrirla, el modal muestra:
-    "Cita de emergencia"
-
-  Texto actual de descripcion:
-    "Este espacio es para verdaderas emergencias. Estos son mis descansos
-     personales y estoy dispuesta a atenderte, pero por favor usa esta opcion
-     con responsabilidad. Cuida mi tiempo y yo cuidare el tuyo."
-
-  Tambien muestra:
-    - "Mis proximos descansos"
-    - Boton: "Llamar ahora"
-    - Disclaimer: "Solo llamadas directas - No se agenda por la app"
-
-  En mini app booking tambien existe una tarjeta similar:
-    "Cita de emergencia"
-    "Para situaciones urgentes - llamame directo"
-
-  Y el modal dice:
-    "Este espacio es para verdaderas emergencias. Recuerda que mis horarios
-     son limitados - usa esta opcion con responsabilidad. Solo llama si
-     realmente lo necesitas."
-
-===============================================================================
-COMPORTAMIENTO BACKEND ESPERADO PARA OPCION 5
-===============================================================================
-
-Si el menu WhatsApp define:
-
-  5 = Cita de emergencia / llamada directa
-
-Entonces backend debe manejar los mensajes:
-
-  "5"
-  "opcion 5"
-  "emergencia"
-  "cita de emergencia"
-  "urgencia"
-  "llamar"
-  "llamar ahora"
-
-con este comportamiento:
-
-  intent sugerido:
-    human_help
-
-  metadata sugerida:
-    action = "emergency_call"
-    urgency = "high"
-
-  needs_human_review:
-    true
-
-  bot_replied_at:
-    debe llenarse si el bot envio el mensaje automatico de instrucciones.
-
-  outbound_message_id:
-    debe apuntar al outbound_message automatico enviado.
-
-===============================================================================
-RESPUESTA AUTOMATICA ESPERADA PARA WHATSAPP OPCION 5
-===============================================================================
-
-Mensaje recomendado:
-
-  "Entiendo que necesitas una cita de emergencia.
-
-   Por favor usa esta opcion solo si realmente lo necesitas. Mis horarios son
-   limitados y este espacio es para verdaderas emergencias.
-
-   Puedes llamarme directamente aqui:
-   {phone_call_link}
-
-   Solo llamadas directas. No se agenda por la app."
-
-Variables necesarias:
-
-  phone_call_link:
-    Debe ser un link telefonico o WhatsApp/telefono valido segun el canal:
-      - tel:+52XXXXXXXXXX, si WhatsApp permite link de llamada
-      - o texto con numero visible: +52 XXX XXX XXXX
-      - o wa.me si se decide abrir chat, pero aclarando que es para llamada
-
-  next_breaks opcional:
-    Si backend puede obtener descansos proximos, incluirlos en el mensaje:
-
-      "Mis proximos descansos:
-       - Martes 14 mayo, 13:00 - 14:00
-       - Jueves 16 mayo, 15:00 - 16:00"
-
-===============================================================================
-MINI APP PARA OPCION 5
-===============================================================================
-
-QA recomienda NO crear una mini app larga para opcion 5.
-
-La opcion 5 debe ser:
-
-  - Respuesta automatica con descripcion de uso responsable.
-  - Mostrar numero / accion de llamada directa.
-  - Registrar inbound como emergencia o human_help urgente.
-  - Mostrar al owner en Mensajes como atencion prioritaria.
-
-Solo si producto decide que debe abrir una pantalla, la ruta podria ser:
-
-  /miniapp/emergency?token=<token>&returnUrl=<optional>
-
-Pero esa pantalla debe replicar lo que ya existe en app/(client)/home.tsx:
-
-  - Titulo: "Cita de emergencia"
-  - Descripcion de uso responsable
-  - Lista de proximos descansos si existen
-  - Boton "Llamar ahora"
-  - Disclaimer "Solo llamadas directas - No se agenda por la app"
-  - Boton regresar debe volver a WhatsApp
-
-===============================================================================
-ENTREGABLES QUE BACKEND DEBE CONFIRMAR PARA OPCION 5
-===============================================================================
-
-1. Confirmar si opcion 5 del menu real es:
-     a) "Hablar con el estudio"
-     b) "Cita de emergencia / llamada directa"
-     c) Otro texto
-
-2. Si opcion 5 es emergencia, confirmar el numero real que se debe mostrar.
-
-3. Confirmar si backend puede consultar/proveer "proximos descansos" para
-   incluirlos en la respuesta WhatsApp o en una mini app futura.
-
-4. Confirmar el payload que se guardara en inbound_messages para distinguir
-   emergencia de human_help general.
-
-5. Confirmar el texto exacto final que enviara el bot para opcion 5.
-
-===============================================================================
-FIN DEL PROMPT v5
-===============================================================================
-
