@@ -105,6 +105,13 @@ export interface OwnerInboundMessage {
   botRepliedAt: string | null;
   /** UUID del outbound_message generado como respuesta automática. null si no hay respuesta. */
   outboundMessageId: string | null;
+  /** Optional backend metadata for specialized actions, e.g. emergency_call. */
+  metadata?: {
+    action?: string;
+    urgency?: string;
+    channel?: string;
+    [key: string]: unknown;
+  } | null;
   client: {
     id: string;
     fullName: string;

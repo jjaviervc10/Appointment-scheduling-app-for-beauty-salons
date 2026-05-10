@@ -116,13 +116,6 @@ export default function SplashScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.gold} />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.ownerButton}
-          onPress={() => router.replace('/(owner)/dashboard')}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.ownerButtonText}>Panel del estudio</Text>
-        </TouchableOpacity>
       </Animated.View>
 
       {/* ── Trust badge ── */}
@@ -283,16 +276,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 17,
   },
-  ownerButton: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  ownerButtonText: {
-    ...typography.bodySmall,
-    color: colors.gray500,
-    textDecorationLine: 'underline',
-  },
-
   // Trust badge
   trustBadge: {
     flexDirection: 'row',

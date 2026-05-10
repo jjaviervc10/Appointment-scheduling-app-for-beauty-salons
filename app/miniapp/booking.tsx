@@ -23,6 +23,7 @@ import {
 import type { PublicAvailabilitySlot, PublicService } from '../../src/types/api';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey, getIsoDateKey } from '../../src/utils/date';
+import { returnToWhatsApp, useMiniAppExitGuard } from '../../src/hooks/useMiniAppExitGuard';
 
 type Step = 'details' | 'service' | 'schedule' | 'confirm';
 
@@ -119,9 +120,12 @@ export default function MiniAppBookingScreen() {
     fullName?: string | string[];
     phone?: string | string[];
     token?: string | string[];
+    returnUrl?: string | string[];
+    waReturnUrl?: string | string[];
   }>();
 
   const token = firstParam(params.token).trim();
+  const whatsappReturnUrl = firstParam(params.returnUrl).trim() || firstParam(params.waReturnUrl).trim();
   const dayOptions = useMemo(() => getNextSevenDays(), []);
 
   const [step, setStep] = useState<Step>('details');
@@ -203,12 +207,11 @@ export default function MiniAppBookingScreen() {
     void loadAvailability();
   }, [loadAvailability]);
 
-  const handleReturnToWhatsApp = () => {
-    if (typeof window !== 'undefined') {
-      window.close();
-    }
-    void Linking.openURL('whatsapp://');
-  };
+  const handleReturnToWhatsApp = useCallback(() => {
+    void returnToWhatsApp(whatsappReturnUrl);
+  }, [whatsappReturnUrl]);
+
+  useMiniAppExitGuard(handleReturnToWhatsApp);
 
   const goToDetails = () => {
     setFormError(null);
@@ -277,7 +280,10 @@ export default function MiniAppBookingScreen() {
 
       router.replace({
         pathname: '/miniapp/success',
-        params: { appointmentId: response.appointment.id },
+        params: {
+          appointmentId: response.appointment.id,
+          ...(whatsappReturnUrl ? { returnUrl: whatsappReturnUrl } : {}),
+        },
       });
     } catch (error) {
       setFormError(isHttpError(error) ? mapErrorMessage(error.status) : 'Ocurrió un error. Intenta más tarde');

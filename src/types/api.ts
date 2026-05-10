@@ -231,6 +231,55 @@ export interface PublicAvailabilityResponse {
   slots: PublicAvailabilitySlot[];
 }
 
+export interface PublicMiniAppTokenAppointment {
+  id: string;
+  serviceId: string;
+  serviceName: string | null;
+  startAt: string;
+  status: AppointmentStatus;
+}
+
+export interface PublicMiniAppTokenResponse {
+  ok: true;
+  purpose: 'booking' | 'availability' | 'reschedule' | 'cancel' | 'human_help';
+  phone: string;
+  fullName: string;
+  expiresAt: string;
+  appointment: PublicMiniAppTokenAppointment | null;
+  appointments: PublicMiniAppTokenAppointment[];
+}
+
+export interface PublicRescheduleRequestInput {
+  token: string;
+  appointmentId: string;
+  newStartAt: string;
+  notes?: string | null;
+}
+
+export interface PublicRescheduleRequestResponse {
+  ok: true;
+  appointment: {
+    id: string;
+    status: AppointmentStatus;
+    requestedStartAt: string;
+  };
+}
+
+export interface PublicCancelAppointmentInput {
+  token: string;
+  appointmentId: string;
+  reason?: string | null;
+}
+
+export interface PublicCancelAppointmentResponse {
+  ok: true;
+  appointment: {
+    id: string;
+    status: AppointmentStatus;
+    cancelledAt: string;
+  };
+}
+
 export class HttpError extends Error {
   readonly status: number;
   readonly details?: ApiErrorDetails;

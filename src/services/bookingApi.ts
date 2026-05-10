@@ -4,6 +4,11 @@ import type {
   PublicAvailabilitySlot,
   PublicBookingRequestInput,
   PublicBookingResponse,
+  PublicCancelAppointmentInput,
+  PublicCancelAppointmentResponse,
+  PublicMiniAppTokenResponse,
+  PublicRescheduleRequestInput,
+  PublicRescheduleRequestResponse,
   PublicService,
   PublicServicesResponse,
 } from '../types/api';
@@ -39,4 +44,30 @@ export async function getPublicAvailability(
     `/api/public/availability?${query}`
   );
   return response.slots;
+}
+
+export async function getPublicMiniAppToken(
+  token: string
+): Promise<PublicMiniAppTokenResponse> {
+  return apiRequest<PublicMiniAppTokenResponse>(
+    `/api/public/miniapp-tokens/${encodeURIComponent(token)}`
+  );
+}
+
+export async function createPublicRescheduleRequest(
+  input: PublicRescheduleRequestInput
+): Promise<PublicRescheduleRequestResponse> {
+  return apiRequest<PublicRescheduleRequestResponse>('/api/public/appointments/reschedule-request', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export async function cancelPublicAppointment(
+  input: PublicCancelAppointmentInput
+): Promise<PublicCancelAppointmentResponse> {
+  return apiRequest<PublicCancelAppointmentResponse>('/api/public/appointments/cancel', {
+    method: 'POST',
+    body: input,
+  });
 }

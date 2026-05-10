@@ -129,6 +129,35 @@ function formatDateTime(value: string | null | undefined): string {
   return date.toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+function isEmergencyCallMessage(msg: OwnerInboundMessage): boolean {
+  if (msg.metadata?.action === 'emergency_call' || msg.metadata?.urgency === 'high') {
+    return true;
+  }
+
+  const text = `${msg.normalized_body ?? ''} ${msg.body}`.toLowerCase();
+  return msg.intent === 'human_help' && (
+    text.includes('emergency_call') ||
+    text.includes('emergencia') ||
+    text.includes('urgencia') ||
+    text.includes('cita de emergencia') ||
+    text.trim() === '5' ||
+    text.includes('opcion 5') ||
+    text.includes('llamar ahora')
+  );
+}
+
+function getInboundIntentDisplay(msg: OwnerInboundMessage) {
+  if (isEmergencyCallMessage(msg)) {
+    return {
+      label: 'Cita de emergencia',
+      color: colors.error,
+      icon: 'flash' as keyof typeof Ionicons.glyphMap,
+    };
+  }
+
+  return INBOUND_INTENT_CONFIG[msg.intent] ?? INBOUND_INTENT_CONFIG.unknown;
+}
+
 function getOutboundTimestamp(msg: OwnerMessage): string {
   if (msg.deliveredAt) return `Entregado: ${formatDateTime(msg.deliveredAt)}`;
   if (msg.sentAt) return `Enviado: ${formatDateTime(msg.sentAt)}`;
@@ -556,7 +585,7 @@ export default function MessagesScreen() {
             />
           ) : (
             inMessages.map((msg) => {
-              const intentCfg = INBOUND_INTENT_CONFIG[msg.intent] ?? INBOUND_INTENT_CONFIG.unknown;
+              const intentCfg = getInboundIntentDisplay(msg);
               const isUnread = msg.readAt === null;
               const isMarkingThis = markingReadId === msg.id;
               const displayName = msg.client?.fullName ?? msg.fromPhone;
@@ -576,7 +605,9 @@ export default function MessagesScreen() {
 
               // Label for urgent attention banner
               const urgentLabel: Record<string, string> = {
-                human_help: 'El cliente quiere hablar directamente',
+                human_help: isEmergencyCallMessage(msg)
+                  ? 'Cita de emergencia / llamada directa'
+                  : 'El cliente quiere hablar directamente',
                 booking:    'Solicitud de cita sin procesar',
                 reschedule: 'Solicitud de cambio pendiente',
                 cancel:     'Solicitud de cancelacion pendiente',
@@ -701,7 +732,7 @@ export default function MessagesScreen() {
                     </Text>
                   </View>
                   {(() => {
-                    const cfg2 = INBOUND_INTENT_CONFIG[selectedMsg.intent] ?? INBOUND_INTENT_CONFIG.unknown;
+                    const cfg2 = getInboundIntentDisplay(selectedMsg);
                     return (
                       <View style={[styles.intentBadge, { backgroundColor: cfg2.color + '18' }]}>
                         <Ionicons name={cfg2.icon} size={12} color={cfg2.color} />
@@ -716,7 +747,9 @@ export default function MessagesScreen() {
                   <View style={styles.sheetWarning}>
                     <Ionicons name="warning-outline" size={15} color={colors.error} />
                     <Text style={styles.sheetWarningText}>
-                      Este cliente no ha recibido respuesta — atiende por WhatsApp directamente
+                      {isEmergencyCallMessage(selectedMsg)
+                        ? 'Cita de emergencia: prioriza llamada directa por WhatsApp'
+                        : 'Este cliente no ha recibido respuesta — atiende por WhatsApp directamente'}
                     </Text>
                   </View>
                 )}

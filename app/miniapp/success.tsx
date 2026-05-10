@@ -1,18 +1,29 @@
-import React from 'react';
-import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
+import { returnToWhatsApp, useMiniAppExitGuard } from '../../src/hooks/useMiniAppExitGuard';
+
+function firstParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? '';
+  return value ?? '';
+}
 
 export default function MiniAppSuccessScreen() {
-  const params = useLocalSearchParams<{ appointmentId?: string }>();
+  const params = useLocalSearchParams<{
+    appointmentId?: string | string[];
+    returnUrl?: string | string[];
+    waReturnUrl?: string | string[];
+  }>();
+  const appointmentId = firstParam(params.appointmentId);
+  const whatsappReturnUrl = firstParam(params.returnUrl).trim() || firstParam(params.waReturnUrl).trim();
 
-  const handleReturnToWhatsApp = () => {
-    if (typeof window !== 'undefined') {
-      window.close();
-    }
-    void Linking.openURL('whatsapp://');
-  };
+  const handleReturnToWhatsApp = useCallback(() => {
+    void returnToWhatsApp(whatsappReturnUrl);
+  }, [whatsappReturnUrl]);
+
+  useMiniAppExitGuard(handleReturnToWhatsApp);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -30,10 +41,10 @@ export default function MiniAppSuccessScreen() {
           <Text style={styles.subtitle}>Tu cita queda pendiente de aprobación</Text>
           <Text style={styles.message}>Te avisaremos por WhatsApp cuando sea aprobada</Text>
 
-          {params.appointmentId ? (
+          {appointmentId ? (
             <View style={styles.receipt}>
               <Text style={styles.receiptLabel}>Folio</Text>
-              <Text style={styles.receiptValue}>{params.appointmentId}</Text>
+              <Text style={styles.receiptValue}>{appointmentId}</Text>
             </View>
           ) : null}
 
