@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
@@ -87,8 +90,14 @@ function formatTimeLabel(isoDateTime: string): string {
   });
 }
 
+function isValidPhone(raw: string): boolean {
+  const digits = raw.replace(/\D/g, '');
+  return digits.length === 10 || (digits.length === 12 && digits.startsWith('52'));
+}
+
 function mapErrorMessage(status: number): string {
-  if (status === 400 || status === 422) return 'Revisa tus datos';
+  if (status === 400) return 'Datos incorrectos. Verifica tu nombre y celular';
+  if (status === 422) return 'El horario seleccionado ya no está disponible. Elige otro';
   if (status === 404) return 'El servicio ya no está disponible';
   if (status === 409) return 'Ese horario ya fue ocupado. Elige otro';
   if (status === 429) return 'Demasiados intentos. Intenta más tarde';
@@ -128,6 +137,10 @@ export default function MiniAppBookingScreen() {
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [selectedSlotStartAt, setSelectedSlotStartAt] = useState('');
+  const [appointmentType, setAppointmentType] = useState<'individual' | 'familiar'>('individual');
+  const [familyWho, setFamilyWho] = useState<'papa_hijos' | 'solo_hijos'>('papa_hijos');
+  const [childCount, setChildCount] = useState(1);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -190,6 +203,13 @@ export default function MiniAppBookingScreen() {
     void loadAvailability();
   }, [loadAvailability]);
 
+  const handleReturnToWhatsApp = () => {
+    if (typeof window !== 'undefined') {
+      window.close();
+    }
+    void Linking.openURL('whatsapp://');
+  };
+
   const goToDetails = () => {
     setFormError(null);
     setStep('details');
@@ -197,8 +217,20 @@ export default function MiniAppBookingScreen() {
 
   const goToService = () => {
     setFormError(null);
-    if (!fullName.trim() || !phone.trim()) {
-      setFormError('Escribe tu nombre y celular');
+    if (!fullName.trim()) {
+      setFormError('El nombre completo es obligatorio');
+      return;
+    }
+    if (fullName.trim().length < 2) {
+      setFormError('El nombre debe tener al menos 2 caracteres');
+      return;
+    }
+    if (!phone.trim()) {
+      setFormError('El número de celular es obligatorio');
+      return;
+    }
+    if (!isValidPhone(phone.trim())) {
+      setFormError('Celular inválido. Ingresa 10 dígitos o +52 seguido de 10 dígitos');
       return;
     }
     setStep('service');
@@ -229,12 +261,17 @@ export default function MiniAppBookingScreen() {
       setIsSubmitting(true);
       setFormError(null);
 
+      const familyNote = appointmentType === 'familiar'
+        ? `[Tipo: familiar] ${familyWho === 'papa_hijos' ? 'Papá + hijos' : 'Solo hijos'} (${childCount} hijo${childCount > 1 ? 's' : ''})`
+        : '';
+      const finalNotes = [familyNote, notes.trim()].filter(Boolean).join(' · ');
+
       const response = await createPublicBookingRequest({
         fullName: fullName.trim(),
         phone: phone.trim(),
         serviceId: selectedServiceId,
         startAt: selectedSlotStartAt,
-        notes: notes.trim() ? notes.trim() : undefined,
+        notes: finalNotes || undefined,
         token: token || undefined,
       });
 
@@ -257,7 +294,7 @@ export default function MiniAppBookingScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.appShell}>
-          <BrandHeader />
+          <BrandHeader onExit={handleReturnToWhatsApp} />
           <Progress current={currentStepIndex} />
 
           {formError ? <Text style={styles.errorBanner}>{formError}</Text> : null}
@@ -283,6 +320,70 @@ export default function MiniAppBookingScreen() {
                 style={styles.input}
                 keyboardType="phone-pad"
               />
+
+              <Text style={styles.label}>¿Para quién es la cita?</Text>
+              <View style={styles.typePillRow}>
+                <TouchableOpacity
+                  style={[styles.typePill, appointmentType === 'individual' && styles.typePillActive]}
+                  onPress={() => setAppointmentType('individual')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="person" size={16} color={appointmentType === 'individual' ? colors.black : colors.gray600} />
+                  <Text style={[styles.typePillText, appointmentType === 'individual' && styles.typePillTextActive]}>Individual</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.typePill, appointmentType === 'familiar' && styles.typePillActive]}
+                  onPress={() => setAppointmentType('familiar')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="people" size={16} color={appointmentType === 'familiar' ? colors.black : colors.gray600} />
+                  <Text style={[styles.typePillText, appointmentType === 'familiar' && styles.typePillTextActive]}>Familiar</Text>
+                </TouchableOpacity>
+              </View>
+
+              {appointmentType === 'familiar' ? (
+                <View style={styles.familyForm}>
+                  <Text style={styles.familyLabel}>¿Quién asiste?</Text>
+                  <View style={styles.familyWhoRow}>
+                    <TouchableOpacity
+                      style={[styles.familyWhoPill, familyWho === 'papa_hijos' && styles.familyWhoPillActive]}
+                      onPress={() => setFamilyWho('papa_hijos')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.familyWhoPillText, familyWho === 'papa_hijos' && styles.familyWhoPillTextActive]}>Papá e hijo(s)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.familyWhoPill, familyWho === 'solo_hijos' && styles.familyWhoPillActive]}
+                      onPress={() => setFamilyWho('solo_hijos')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.familyWhoPillText, familyWho === 'solo_hijos' && styles.familyWhoPillTextActive]}>Solo hijo(s)</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.familyLabel}>¿Cuántos hijos?</Text>
+                  <View style={styles.stepperRow}>
+                    <TouchableOpacity
+                      style={[styles.stepperBtn, childCount <= 1 && styles.stepperBtnDisabled]}
+                      onPress={() => setChildCount((c) => Math.max(1, c - 1))}
+                      disabled={childCount <= 1}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="remove" size={18} color={childCount <= 1 ? colors.gray300 : colors.gray700} />
+                    </TouchableOpacity>
+                    <View style={styles.stepperValue}>
+                      <Text style={styles.stepperValueText}>{childCount}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.stepperBtn, childCount >= 5 && styles.stepperBtnDisabled]}
+                      onPress={() => setChildCount((c) => Math.min(5, c + 1))}
+                      disabled={childCount >= 5}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={18} color={childCount >= 5 ? colors.gray300 : colors.gray700} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
 
               <PrimaryAction
                 label="Continuar"
@@ -343,6 +444,23 @@ export default function MiniAppBookingScreen() {
                   })}
                 </View>
               )}
+
+              <TouchableOpacity
+                style={styles.emergencyCard}
+                onPress={() => setShowEmergencyModal(true)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.emergencyCardHeader}>
+                  <View style={styles.emergencyIconWrap}>
+                    <Ionicons name="call" size={20} color={colors.gold} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.emergencyCardTitle}>Cita de emergencia</Text>
+                    <Text style={styles.emergencyCardSub}>Para situaciones urgentes · llámame directo</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.gray500} />
+                </View>
+              </TouchableOpacity>
 
               <PrimaryAction
                 label="Continuar"
@@ -418,6 +536,12 @@ export default function MiniAppBookingScreen() {
               <View style={styles.confirmBox}>
                 <ConfirmRow label="Nombre" value={fullName.trim()} />
                 <ConfirmRow label="Celular" value={phone.trim()} />
+                {appointmentType === 'familiar' ? (
+                  <ConfirmRow
+                    label="Tipo"
+                    value={`${familyWho === 'papa_hijos' ? 'Papá + ' : ''}${childCount} hijo${childCount > 1 ? 's' : ''}`}
+                  />
+                ) : null}
                 <ConfirmRow label="Servicio" value={selectedService?.name ?? 'Sin elegir'} />
                 <ConfirmRow label="Día" value={formatDayLong(selectedDate)} />
                 <ConfirmRow label="Hora" value={selectedSlot ? formatTimeLabel(selectedSlot.slotStartAt) : 'Sin elegir'} />
@@ -444,11 +568,59 @@ export default function MiniAppBookingScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={showEmergencyModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowEmergencyModal(false)}
+      >
+        <View style={styles.emergencyOverlay}>
+          <View style={styles.emergencyModalCard}>
+            <View style={styles.modalHandle} />
+            <View style={styles.emergencyModalHeader}>
+              <Ionicons name="warning-outline" size={20} color={colors.gold} />
+              <Text style={styles.emergencyModalTitle}>Cita de emergencia</Text>
+              <TouchableOpacity
+                onPress={() => setShowEmergencyModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={22} color={colors.gray500} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.emergencyMessage}>
+              <Ionicons name="heart-outline" size={20} color={colors.gold} />
+              <Text style={styles.emergencyMessageText}>
+                Este espacio es para verdaderas emergencias. Recuerda que mis horarios son limitados — usa esta opción con responsabilidad. Solo llama si realmente lo necesitas.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.emergencyCallBtn}
+              onPress={() => {
+                setShowEmergencyModal(false);
+                void Linking.openURL('tel:+525512345678');
+              }}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="call" size={18} color={colors.white} />
+              <Text style={styles.emergencyCallText}>Llamar ahora</Text>
+            </TouchableOpacity>
+            <Text style={styles.emergencyDisclaimer}>Solo llamadas directas · No se agenda por la app</Text>
+            <TouchableOpacity
+              style={styles.emergencyCancelBtn}
+              onPress={() => setShowEmergencyModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.emergencyCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-function BrandHeader() {
+function BrandHeader({ onExit }: { onExit: () => void }) {
   return (
     <View style={styles.brandHeader}>
       <View style={styles.logoWrap}>
@@ -458,6 +630,10 @@ function BrandHeader() {
         <Text style={styles.brandName}>Jaquelina López</Text>
         <Text style={styles.brandMeta}>Barber Studio</Text>
       </View>
+      <TouchableOpacity style={styles.exitBtn} onPress={onExit} activeOpacity={0.7}>
+        <Ionicons name="arrow-back" size={14} color={colors.gray400} />
+        <Text style={styles.exitText}>Salir</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -743,6 +919,7 @@ const styles = StyleSheet.create({
   serviceHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     gap: spacing.md,
   },
   serviceName: { ...typography.subtitle, color: colors.black, flex: 1 },
@@ -866,5 +1043,230 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.lg,
     textAlign: 'center',
+  },
+
+  // Exit button
+  exitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  exitText: {
+    ...typography.caption,
+    color: colors.gray400,
+  },
+
+  // Appointment type selector
+  typePillRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  typePill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    minHeight: 46,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.gray50,
+  },
+  typePillActive: {
+    backgroundColor: colors.gold,
+    borderColor: colors.goldDark,
+  },
+  typePillText: {
+    ...typography.buttonSmall,
+    color: colors.gray600,
+  },
+  typePillTextActive: {
+    color: colors.black,
+    fontWeight: '700' as const,
+  },
+
+  // Family sub-form
+  familyForm: {
+    backgroundColor: colors.gray50,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  familyLabel: {
+    ...typography.caption,
+    color: colors.gray700,
+    fontWeight: '700' as const,
+  },
+  familyWhoRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  familyWhoPill: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  familyWhoPillActive: {
+    backgroundColor: colors.goldDark,
+    borderColor: colors.goldDark,
+  },
+  familyWhoPillText: {
+    ...typography.caption,
+    color: colors.gray600,
+    fontWeight: '600' as const,
+  },
+  familyWhoPillTextActive: {
+    color: colors.white,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  stepperBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: colors.gray300,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnDisabled: {
+    borderColor: colors.gray200,
+    backgroundColor: colors.gray50,
+  },
+  stepperValue: {
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValueText: {
+    ...typography.subtitle,
+    color: colors.black,
+  },
+
+  // Emergency card in service list
+  emergencyCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray200,
+    backgroundColor: colors.gray50,
+    padding: spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+  },
+  emergencyCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  emergencyIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.gold + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyCardTitle: {
+    ...typography.subtitle,
+    color: colors.black,
+  },
+  emergencyCardSub: {
+    ...typography.caption,
+    color: colors.gray500,
+    marginTop: 2,
+  },
+
+  // Emergency modal
+  emergencyOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  emergencyModalCard: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
+    gap: spacing.md,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.gray300,
+    alignSelf: 'center',
+    marginTop: spacing.sm,
+  },
+  emergencyModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray200,
+  },
+  emergencyModalTitle: {
+    ...typography.subtitle,
+    color: colors.black,
+    flex: 1,
+  },
+  emergencyMessage: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+    backgroundColor: colors.gold + '10',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+  },
+  emergencyMessageText: {
+    ...typography.bodySmall,
+    color: colors.gray700,
+    flex: 1,
+    lineHeight: 20,
+  },
+  emergencyCallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.statusConfirmed,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+  },
+  emergencyCallText: {
+    ...typography.button,
+    color: colors.white,
+    fontSize: 15,
+  },
+  emergencyDisclaimer: {
+    ...typography.caption,
+    color: colors.gray500,
+    textAlign: 'center',
+  },
+  emergencyCancelBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.sm,
+  },
+  emergencyCancelText: {
+    ...typography.buttonSmall,
+    color: colors.gray500,
   },
 });

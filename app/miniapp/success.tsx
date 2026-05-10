@@ -1,12 +1,18 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
 
 export default function MiniAppSuccessScreen() {
-  const router = useRouter();
   const params = useLocalSearchParams<{ appointmentId?: string }>();
+
+  const handleReturnToWhatsApp = () => {
+    if (typeof window !== 'undefined') {
+      window.close();
+    }
+    void Linking.openURL('whatsapp://');
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -33,10 +39,10 @@ export default function MiniAppSuccessScreen() {
 
           <TouchableOpacity
             style={styles.button}
-            onPress={() => router.replace('/miniapp/booking')}
+            onPress={handleReturnToWhatsApp}
             activeOpacity={0.85}
           >
-            <Text style={styles.buttonText}>Entendido</Text>
+            <Text style={styles.buttonText}>Volver al chat de WhatsApp</Text>
           </TouchableOpacity>
         </View>
       </View>
