@@ -15,12 +15,41 @@ function getSafeWhatsAppUrl(returnUrl?: string) {
   return isWhatsAppUrl ? trimmedUrl : WHATSAPP_SCHEME;
 }
 
-export async function returnToWhatsApp(returnUrl?: string) {
-  if (typeof window !== 'undefined') {
-    window.close();
-  }
+/**
+ * Opens a URL via a hidden anchor click.
+ * On Android Chrome Custom Tab, this triggers the intent system without
+ * causing a full page navigation event (avoids the black-screen flash).
+ * window.close() is intentionally omitted — it only works for windows opened
+ * via window.open(), never for pages opened from external links (e.g. WhatsApp).
+ */
+function openViaAnchor(url: string): void {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.rel = 'noopener noreferrer';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+}
 
+export async function returnToWhatsApp(returnUrl?: string) {
   const targetUrl = getSafeWhatsAppUrl(returnUrl);
+
+  if (typeof window !== 'undefined') {
+    // In-app browser / Chrome Custom Tab (WhatsApp web link):
+    // - window.close() doesn't work — page wasn't opened via window.open()
+    // - Linking.openURL() on web calls window.open() which Chrome Custom Tab blocks
+    // - window.location.href works but triggers a navigation event causing a black flash
+    // Anchor click triggers the Android intent for whatsapp:// without a page navigation event.
+    openViaAnchor(targetUrl);
+
+    // Fallback after 1.5 s: if the custom scheme wasn't handled (WhatsApp not installed
+    // or scheme unrecognized), navigate directly via location as last resort.
+    if (targetUrl !== WHATSAPP_SCHEME) {
+      setTimeout(() => openViaAnchor(WHATSAPP_SCHEME), 1500);
+    }
+    return;
+  }
 
   try {
     await Linking.openURL(targetUrl);
