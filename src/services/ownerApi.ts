@@ -9,6 +9,10 @@ import type {
   OwnerClientsResponse,
   OwnerServiceRow,
   OwnerServicesResponse,
+  OwnerServiceCreateInput,
+  OwnerServiceUpdateInput,
+  OwnerServiceMutationResult,
+  OwnerServiceMutationResponse,
   OwnerTimeBlockRow,
   OwnerTimeBlocksResponse,
   OwnerTimeBlockCreateInput,
@@ -22,6 +26,8 @@ import type {
   OwnerSettingsResponse,
   CreateIncidentInput,
   CreateIncidentResponse,
+  OwnerMessagesDiagnosticsResponse,
+  SendOwnerMessageNowResponse,
 } from '../types/api';
 import type {
   OwnerMessagesParams,
@@ -371,4 +377,54 @@ export async function getOwnerAwaitingAppointments(): Promise<OwnerAppointmentRo
     requiresOwnerAuth: true,
   });
   return response.data;
+}
+
+// ─── Services CRUD ────────────────────────────────────────────────────────────
+
+export async function createOwnerService(
+  input: OwnerServiceCreateInput
+): Promise<OwnerServiceMutationResult> {
+  const response = await apiRequest<OwnerServiceMutationResponse>('/api/owner/services', {
+    method: 'POST',
+    body: input,
+    requiresOwnerAuth: true,
+  });
+  return response.service;
+}
+
+export async function updateOwnerService(
+  id: string,
+  input: OwnerServiceUpdateInput
+): Promise<OwnerServiceMutationResult> {
+  const response = await apiRequest<OwnerServiceMutationResponse>(
+    `/api/owner/services/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: input,
+      requiresOwnerAuth: true,
+    }
+  );
+  return response.service;
+}
+
+// ─── Messages diagnostics & send-now ─────────────────────────────────────────
+
+export async function getOwnerMessagesDiagnostics(): Promise<OwnerMessagesDiagnosticsResponse> {
+  return apiRequest<OwnerMessagesDiagnosticsResponse>('/api/owner/messages/diagnostics', {
+    requiresOwnerAuth: true,
+  });
+}
+
+export async function sendOwnerMessageNow(
+  id: string
+): Promise<SendOwnerMessageNowResponse['message']> {
+  const response = await apiRequest<SendOwnerMessageNowResponse>(
+    `/api/owner/messages/${encodeURIComponent(id)}/send-now`,
+    {
+      method: 'POST',
+      body: {},
+      requiresOwnerAuth: true,
+    }
+  );
+  return response.message;
 }

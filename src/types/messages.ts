@@ -28,6 +28,29 @@ export interface OwnerMessage {
     serviceName: string;
   } | null;
   body: string;
+  /** Present when the worker sent a brand image via metadata.imagePayload */
+  metadata?: {
+    imagePayload?: {
+      link: string;
+      caption?: string;
+    } | null;
+    interactivePayload?: {
+      type: 'button' | 'cta_url' | 'list' | string;
+      body?: { text: string };
+      action?: {
+        name?: string;
+        parameters?: {
+          display_text?: string;
+          url?: string;
+          [key: string]: unknown;
+        };
+        [key: string]: unknown;
+      };
+      [key: string]: unknown;
+    } | null;
+    purpose?: string;
+    [key: string]: unknown;
+  } | null;
   sentAt: string | null;
   deliveredAt: string | null;
   failedAt: string | null;

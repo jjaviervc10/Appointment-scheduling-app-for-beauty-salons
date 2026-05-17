@@ -87,15 +87,58 @@ export interface OwnerClientDetailResponse {
 export interface OwnerServiceRow {
   id: string;
   name: string;
+  description: string | null;
   duration_minutes: number;
   buffer_before_minutes: number;
   buffer_after_minutes: number;
   is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface OwnerServicesResponse {
   ok: true;
   data: OwnerServiceRow[];
+}
+
+/** Shape returned by POST /api/owner/services and PATCH /api/owner/services/:id (camelCase) */
+export interface OwnerServiceMutationResult {
+  id: string;
+  name: string;
+  description: string | null;
+  durationMinutes: number;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OwnerServiceMutationResponse {
+  ok: true;
+  service: OwnerServiceMutationResult;
+}
+
+export interface OwnerServiceCreateInput {
+  name: string;
+  description?: string | null;
+  durationMinutes: number;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface OwnerServiceUpdateInput {
+  name?: string;
+  description?: string | null;
+  durationMinutes?: number;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
+  sortOrder?: number;
+  isActive?: boolean;
 }
 
 export interface OwnerTimeBlockRow {
@@ -330,5 +373,43 @@ export interface CreateIncidentResponse {
     description: string | null;
     created_at: string;
     affectedAppointmentsCount: number;
+  };
+}
+
+// ─── Messages diagnostics & send-now ─────────────────────────────────────────
+
+export interface OwnerMessagesDiagnosticsResponse {
+  ok: true;
+  whatsapp: {
+    dryRun: boolean;
+    mode: 'test' | 'production' | string;
+    workerEnabled: boolean;
+    workerIntervalMs: number;
+    workerBatchSize: number;
+    phoneNumberIdConfigured: boolean;
+    accessTokenConfigured: boolean;
+    verifyTokenConfigured: boolean;
+    allowedTestPhonesCount: number;
+    miniAppBaseUrl: string;
+    brandImageConfigured: boolean;
+    sendBrandImage: boolean;
+    emergencyCallPhoneConfigured: boolean;
+  };
+  queue: {
+    pending: number;
+    queued: number;
+    sent: number;
+    delivered: number;
+    read: number;
+    failed: number;
+  };
+}
+
+export interface SendOwnerMessageNowResponse {
+  ok: true;
+  message: {
+    id: string;
+    status: string;
+    providerMessageId: string | null;
   };
 }
