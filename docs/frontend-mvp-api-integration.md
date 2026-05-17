@@ -41,8 +41,9 @@ Rutas nuevas:
 
 La mini app:
 
-- Lee query params opcionales: `token`, `phone`, `fullName`.
-- Prellena `phone` y `fullName` si vienen en URL.
+- Lee query params opcionales: `token`, `phone`, `fullName`, `returnTo`, `intent`.
+- Prellena `phone` y `fullName` si vienen en URL (el campo sigue siendo editable).
+- Adapta título y helper según `intent` (ver §4).
 - Usa una experiencia guiada de 4 pasos: datos, servicio, dia/horario, confirmar.
 - Carga servicios reales con `GET /api/public/services`.
 - Carga disponibilidad real con `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`.
@@ -68,10 +69,10 @@ En mini app no hay fallback mock silencioso cuando falla backend:
 
 1. **Tus datos**
 	- Logo del negocio.
-	- Titulo visible: `Agenda tu cita`.
-	- Subtitulo: `Es rapido y facil`.
+	- Titulo visible: depende de `intent` (ver §4).
+	- Subtitulo/helper: depende de `intent`.
 	- Campos: `Nombre completo`, `Celular`.
-	- Si el link trae `phone` o `fullName`, se prellenan.
+	- Si el link trae `phone` o `fullName`, se prellenan (editables).
 	- Accion principal: `Continuar`.
 2. **Servicio**
 	- Titulo: `Elige un servicio`.
@@ -97,9 +98,69 @@ En mini app no hay fallback mock silencioso cuando falla backend:
 		- `Solicitud enviada`
 		- `Tu cita queda pendiente de aprobacion`
 		- `Te avisaremos por WhatsApp cuando sea aprobada`
-		- Boton `Entendido`
+		- Boton `Volver a WhatsApp` si `returnTo=whatsapp`; de lo contrario `Volver al chat de WhatsApp`.
 
-## 4) Ejemplos de links
+## 4) Intent y parámetros WhatsApp CTA
+
+El backend WhatsApp envía links con `intent` y `returnTo` para contextualizar la mini app.
+
+### Parámetros soportados
+
+| Parámetro | Valores | Efecto |
+|---|---|---|
+| `intent` | `booking` (default) | Título: "Agenda tu cita", helper: "Es rápido y fácil" |
+| `intent` | `availability` | Título: "Horarios disponibles", helper: "Elige un servicio para ver horarios" |
+| `intent` | `reschedule` | Título: "Reprogramar cita", helper: "Elige un nuevo horario disponible" |
+| `returnTo` | `whatsapp` | En success: botón "Volver a WhatsApp" que abre `wa.me/{phone}` |
+| `phone` | E.164 url-encoded | Prellena el campo celular (editable) |
+| `fullName` | url-encoded | Prellena el campo nombre (editable) |
+| `token` | uuid | Token de un solo uso para flujos con cita activa |
+
+### Ejemplos de links desde WhatsApp CTA
+
+**intent=booking** (menú opción 1 — agendar):
+
+```
+/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=booking
+```
+
+**intent=availability** (menú opción 2 — ver horarios):
+
+```
+/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=availability
+```
+
+**intent=reschedule** (menú opción 3 — reprogramar):
+
+```
+/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=reschedule
+```
+
+### URLs de prueba local (puerto 8081)
+
+```
+http://localhost:8081/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=booking
+http://localhost:8081/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=availability
+http://localhost:8081/miniapp/booking?phone=%2B526141234567&returnTo=whatsapp&intent=reschedule
+```
+
+### Limitación actual de reschedule
+
+El flujo `intent=reschedule` **crea una nueva solicitud de booking** — no modifica una cita existente.
+
+Pendiente para fase futura:
+- Recibir `token` o `appointmentId` seguro por URL que identifique la cita a reprogramar.
+- Llamar a `PUT /api/public/appointments/reschedule-request` en lugar de `POST /api/public-booking/request`.
+- El backend debe generar un token de un solo uso válido por 24 h para el link.
+- El TODO está marcado en código en `booking.tsx` step `schedule`.
+
+### Comportamiento returnTo=whatsapp en success
+
+1. Si `returnTo=whatsapp` y `phone` disponible: abre `https://wa.me/{digits}` via `Linking`.
+2. Si `Linking.canOpenURL` devuelve `false` (web sin WhatsApp instalado): muestra texto fallback "Puedes volver manualmente al chat de WhatsApp".
+3. Si no hay `returnTo=whatsapp`: usa el comportamiento anterior (`returnToWhatsApp(returnUrl)`).
+
+## 6) Ejemplos de links
 
 Ejemplo local completo:
 
@@ -127,7 +188,7 @@ Ejemplos futuros desde WhatsApp:
 
 `https://barberjaquelinalopezstudio.netlify.app/miniapp/booking?token=TOKEN&phone=%2B526141234567`
 
-## 5) Manejo de errores mini app
+## 7) Manejo de errores mini app
 
 En mini app, el submit mapea estados comunes:
 
@@ -139,14 +200,14 @@ En mini app, el submit mapea estados comunes:
 
 Tambien se muestra error visible cuando falla la carga de servicios o disponibilidad.
 
-## 6) Timezone y slots
+## 8) Timezone y slots
 
 - El frontend no construye horarios manualmente.
 - El frontend usa `slotStartAt` devuelto por `GET /api/public/availability` como valor de `startAt`.
 - Para mostrar hora al usuario se formatea con locale `es-MX` y zona `America/Mexico_City`.
 - No se debe mostrar `requestedStartAt` como hora visible porque incluye buffers del servicio.
 
-## 7) Notas de entorno local
+## 9) Notas de entorno local
 
 - Web y iOS simulador suelen aceptar `http://localhost:3000`.
 - En Android emulador, puede requerirse `http://10.0.2.2:3000`.
@@ -163,7 +224,7 @@ URL local:
 
 `http://localhost:8081/miniapp/booking?phone=%2B526141234567&fullName=Ana`
 
-## 8) Fase MVP conectada
+## 10) Fase MVP conectada
 
 - `GET /api/public/services`
 - `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`

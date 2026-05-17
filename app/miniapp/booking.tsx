@@ -128,6 +128,26 @@ function getPersonLabel(
   return `Hijo ${index + 1}`;
 }
 
+type BookingIntent = 'booking' | 'availability' | 'reschedule';
+
+function resolveIntent(raw: string): BookingIntent {
+  if (raw === 'availability') return 'availability';
+  if (raw === 'reschedule') return 'reschedule';
+  return 'booking';
+}
+
+function intentTitle(intent: BookingIntent): string {
+  if (intent === 'availability') return 'Horarios disponibles';
+  if (intent === 'reschedule') return 'Reprogramar cita';
+  return 'Agenda tu cita';
+}
+
+function intentHelper(intent: BookingIntent): string {
+  if (intent === 'availability') return 'Elige un servicio para ver horarios';
+  if (intent === 'reschedule') return 'Elige un nuevo horario disponible';
+  return 'Es rápido y fácil';
+}
+
 export default function MiniAppBookingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -136,10 +156,14 @@ export default function MiniAppBookingScreen() {
     token?: string | string[];
     returnUrl?: string | string[];
     waReturnUrl?: string | string[];
+    returnTo?: string | string[];
+    intent?: string | string[];
   }>();
 
   const token = firstParam(params.token).trim();
   const whatsappReturnUrl = firstParam(params.returnUrl).trim() || firstParam(params.waReturnUrl).trim();
+  const returnTo = firstParam(params.returnTo).trim();
+  const intent = resolveIntent(firstParam(params.intent).trim());
   const dayOptions = useMemo(() => getNextSevenDays(), []);
 
   const [step, setStep] = useState<Step>('details');
@@ -370,6 +394,8 @@ export default function MiniAppBookingScreen() {
         params: {
           appointmentId: response.appointment.id,
           ...(whatsappReturnUrl ? { returnUrl: whatsappReturnUrl } : {}),
+          ...(returnTo ? { returnTo } : {}),
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
         },
       });
     } catch (error) {
@@ -393,7 +419,7 @@ export default function MiniAppBookingScreen() {
           {formError ? <Text style={styles.errorBanner}>{formError}</Text> : null}
 
           {step === 'details' ? (
-            <WizardCard title="Agenda tu cita" helper="Es rápido y fácil">
+            <WizardCard title={intentTitle(intent)} helper={intentHelper(intent)}>
               <Text style={styles.label}>Nombre completo</Text>
               <TextInput
                 value={fullName}
@@ -602,7 +628,14 @@ export default function MiniAppBookingScreen() {
           ) : null}
 
           {step === 'schedule' ? (
-            <WizardCard title="Elige día y horario" helper="Horarios reales disponibles">
+            <WizardCard
+              title={intent === 'reschedule' ? 'Reprogramar cita' : 'Elige día y horario'}
+              helper={intent === 'reschedule' ? 'Elige un nuevo horario disponible' : 'Horarios reales disponibles'}
+            >
+              {/* TODO(reschedule-token): fase futura — recibir appointmentId/token seguro por
+                  parámetro URL para identificar la cita a reprogramar y llamar al endpoint
+                  PUT /api/public/appointments/reschedule-request en lugar de crear nueva solicitud.
+                  Por ahora el flujo crea una nueva solicitud de booking. */}
               <Text style={styles.label}>Día</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysRow}>
                 {dayOptions.map((day) => {
