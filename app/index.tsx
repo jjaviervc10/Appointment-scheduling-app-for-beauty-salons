@@ -57,7 +57,7 @@ export default function SplashScreen() {
           ]}
         >
           <Image
-            source={require('../assets/LogoMejoradoJMiChipleras2.png')}
+            source={require('../assets/logo-whatsapp.png')}
             style={styles.logoImage as ImageStyle}
             resizeMode="contain"
           />
