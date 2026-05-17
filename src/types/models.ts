@@ -19,6 +19,7 @@ export interface AppointmentViewModel {
   startAt: Date;
   endAt: Date;
   notes: string | null;
+  clientResponseAt?: string | null;
 }
 
 /** Day summary for calendar view */

@@ -142,6 +142,18 @@ export function DayView({ date, appointments, blocks, onDateChange }: DayViewPro
                     <Text style={styles.apptDetail} numberOfLines={1}>
                       {appt.serviceName} · {appt.durationMinutes} min
                     </Text>
+                    {appt.status === 'client_confirmed' && (
+                      <View style={styles.clientConfirmedBadge}>
+                        <Ionicons name="checkmark-circle" size={10} color={colors.statusConfirmed} />
+                        <Text style={styles.clientConfirmedText}>Confirmó asistencia</Text>
+                      </View>
+                    )}
+                    {appt.status === 'reschedule_required' && (
+                      <View style={styles.clientConfirmedBadge}>
+                        <Ionicons name="warning-outline" size={10} color={colors.gold} />
+                        <Text style={[styles.clientConfirmedText, { color: colors.gold }]}>Pidió cambio</Text>
+                      </View>
+                    )}
                   </View>
                   <View style={styles.apptTimeBox}>
                     <Text style={styles.apptTime}>
@@ -217,6 +229,49 @@ function AppointmentQuickActions({ appointment, onClose }: { appointment: Appoin
               <Text style={[modalStyles.statusText, { color: sc.text }]}>{label}</Text>
             </View>
           </View>
+
+          {/* ── Confirmación del cliente ── */}
+          {(appointment.status === 'client_confirmed' ||
+            appointment.status === 'awaiting_client_confirmation' ||
+            appointment.status === 'reschedule_required') && (
+            <View style={modalStyles.confirmationSection}>
+              <Text style={modalStyles.confirmationTitle}>Confirmación del cliente</Text>
+              {appointment.status === 'client_confirmed' && (
+                <View style={modalStyles.confirmationRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.statusConfirmed} />
+                  <View style={modalStyles.confirmationInfo}>
+                    <Text style={[modalStyles.confirmationLabel, { color: colors.statusConfirmed }]}>
+                      El cliente confirmó por WhatsApp
+                    </Text>
+                    {appointment.clientResponseAt ? (
+                      <Text style={modalStyles.confirmationDate}>
+                        {new Date(appointment.clientResponseAt).toLocaleString('es-MX', {
+                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              )}
+              {appointment.status === 'awaiting_client_confirmation' && (
+                <View style={modalStyles.confirmationRow}>
+                  <Ionicons name="time-outline" size={16} color={colors.statusAwaitingClient} />
+                  <Text style={[modalStyles.confirmationLabel, { color: colors.statusAwaitingClient }]}>
+                    Esperando confirmación
+                  </Text>
+                </View>
+              )}
+              {appointment.status === 'reschedule_required' && (
+                <View style={modalStyles.confirmationRow}>
+                  <Ionicons name="refresh-circle-outline" size={16} color={colors.gold} />
+                  <Text style={[modalStyles.confirmationLabel, { color: colors.gold }]}>
+                    Cliente pidió cambiar la cita
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
           <View style={modalStyles.actionsGrid}>
             {actions.map((action) => (
               <TouchableOpacity key={action.label} style={modalStyles.actionBtn} activeOpacity={0.7}>
@@ -258,6 +313,40 @@ const modalStyles = StyleSheet.create({
   actionLabel: { ...typography.caption, color: colors.gray400, textAlign: 'center', fontSize: 10 },
   closeBtn: { marginTop: spacing.xl, alignItems: 'center', paddingVertical: spacing.sm },
   closeBtnText: { ...typography.bodySmall, color: colors.gray500 },
+  confirmationSection: {
+    backgroundColor: colors.gray800,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    marginBottom: spacing.xl,
+    gap: spacing.xs,
+  },
+  confirmationTitle: {
+    ...typography.caption,
+    color: colors.gray400,
+    fontWeight: '600',
+    marginBottom: spacing.xs,
+    textTransform: 'uppercase',
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  confirmationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  confirmationInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  confirmationLabel: {
+    ...typography.bodySmall,
+    fontWeight: '500',
+  },
+  confirmationDate: {
+    ...typography.caption,
+    color: colors.gray500,
+    fontSize: 11,
+  },
 });
 
 const styles = StyleSheet.create({
@@ -435,5 +524,16 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+  },
+  clientConfirmedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 2,
+  },
+  clientConfirmedText: {
+    fontSize: 9,
+    color: colors.statusConfirmed,
+    fontWeight: '600',
   },
 });

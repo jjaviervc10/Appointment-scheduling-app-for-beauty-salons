@@ -21,6 +21,7 @@ export interface OwnerAppointmentRow {
   requested_end_at: string;
   notes: string | null;
   cancellation_reason: string | null;
+  client_response_at?: string | null;
   created_at?: string;
   clients?: {
     id: string;

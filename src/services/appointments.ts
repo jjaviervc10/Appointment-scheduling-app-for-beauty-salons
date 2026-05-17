@@ -32,6 +32,7 @@ function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel 
     startAt,
     endAt,
     notes: row.notes,
+    clientResponseAt: row.client_response_at ?? null,
   };
 }
 

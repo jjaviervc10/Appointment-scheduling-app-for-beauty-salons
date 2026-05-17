@@ -23,7 +23,7 @@ export const statusLabels: Record<AppointmentStatus, string> = {
   rejected_by_owner: 'Rechazada',
   confirmed_by_owner: 'Confirmada',
   awaiting_client_confirmation: 'Esperando confirmación',
-  client_confirmed: 'Confirmada',
+  client_confirmed: 'Confirmó asistencia',
   client_cancelled: 'Cancelada',
   owner_cancelled: 'Cancelada por dueño',
   reschedule_required: 'Reprogramar',

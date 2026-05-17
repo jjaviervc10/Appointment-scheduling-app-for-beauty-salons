@@ -58,7 +58,7 @@ function mapMsgToApptViewModel(msg: OwnerInboundMessage): AppointmentViewModel |
     notes: null,
   };
 }
-type OutboundFilter = 'all' | 'read' | 'failed' | null;
+type OutboundFilter = 'all' | 'read' | 'failed' | 'reconfirmation' | null;
 type InboundFilter = 'all' | 'attention' | 'booking' | 'reschedule' | 'human_help' | null;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -203,7 +203,8 @@ export default function MessagesScreen() {
       setOutActionError(null);
 
       const statusFilter = outFilter === 'read' || outFilter === 'failed' ? outFilter : undefined;
-      const response = await getOwnerMessages({ status: statusFilter, page: 1, limit: PAGE_SIZE });
+      const typeFilter = outFilter === 'reconfirmation' ? 'reconfirmation' as const : undefined;
+      const response = await getOwnerMessages({ status: statusFilter, messageType: typeFilter, page: 1, limit: PAGE_SIZE });
 
       // Exclude plain-text 'general' bot auto-responses — keep booking notifications AND
       // 'general' messages that carry a structured payload (brand image or interactive CTA).
@@ -307,6 +308,7 @@ export default function MessagesScreen() {
     if (outFilter === 'all') return 'Todos';
     if (outFilter === 'read') return 'Leidos';
     if (outFilter === 'failed') return 'Fallidos';
+    if (outFilter === 'reconfirmation') return 'Reconfirmaciones';
     return null;
   }, [outFilter]);
 
@@ -397,6 +399,14 @@ export default function MessagesScreen() {
               <Text style={[styles.summaryValue, { color: colors.error }]}>{outSummary.failed}</Text>
               <Text style={styles.summaryLabel}>Fallidos</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.summaryItem, outFilter === 'reconfirmation' && styles.summaryItemActive]}
+              onPress={() => setOutFilter((p) => (p === 'reconfirmation' ? null : 'reconfirmation'))}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="checkmark-done-circle-outline" size={16} color={outFilter === 'reconfirmation' ? colors.gold : colors.gray500} />
+              <Text style={styles.summaryLabel}>Reconfirm.</Text>
+            </TouchableOpacity>
           </View>
 
           {outFilterLabel && (
@@ -456,6 +466,20 @@ export default function MessagesScreen() {
                   <Text style={styles.messageType}>
                     {OUTBOUND_TYPE_LABELS[msg.messageType] ?? msg.messageType}
                   </Text>
+                  {/* ── Reconfirmation buttons badge ──────────────────────────────── */}
+                  {msg.messageType === 'reconfirmation' &&
+                    msg.metadata?.interactivePayload?.type === 'button' && (
+                    <View style={styles.reconfirmButtons}>
+                      <Ionicons name="checkmark-done-circle-outline" size={13} color={colors.statusConfirmed} />
+                      <Text style={styles.reconfirmButtonsText}>Botones: </Text>
+                      <View style={styles.reconfirmChip}>
+                        <Text style={styles.reconfirmChipText}>Confirmar asistencia</Text>
+                      </View>
+                      <View style={[styles.reconfirmChip, { backgroundColor: colors.gold + '20' }]}>
+                        <Text style={[styles.reconfirmChipText, { color: colors.gold }]}>Necesito cambio</Text>
+                      </View>
+                    </View>
+                  )}
                   {/* ── Payload badges ─────────────────────────────────────── */}
                   {msg.metadata?.imagePayload ? (
                     <View style={styles.payloadBadge}>
@@ -486,7 +510,11 @@ export default function MessagesScreen() {
                     </Text>
                   ) : null}
                   {msg.failureReason ? (
-                    <Text style={styles.failureText} numberOfLines={2}>{msg.failureReason}</Text>
+                    <Text style={styles.failureText} numberOfLines={2}>
+                      {msg.messageType === 'reconfirmation'
+                        ? `No se pudo enviar el recordatorio: ${msg.failureReason}`
+                        : msg.failureReason}
+                    </Text>
                   ) : null}
                   <View style={styles.messageFooter}>
                     <Text style={styles.messageTime}>{getOutboundTimestamp(msg)}</Text>
@@ -513,7 +541,7 @@ export default function MessagesScreen() {
           <View style={styles.infoBar}>
             <Ionicons name="information-circle-outline" size={16} color={colors.gray500} />
             <Text style={styles.infoText}>
-              Solo se muestran notificaciones ligadas a citas (confirmaciones, recordatorios, aprobaciones).
+              Solo se muestran notificaciones ligadas a citas (confirmaciones, recordatorios, reconfirmaciones, aprobaciones).
             </Text>
           </View>
         </ScrollView>
@@ -1091,6 +1119,26 @@ const styles = StyleSheet.create({
     borderColor: colors.gray700,
   },
   payloadBadgeText: { ...typography.caption, color: colors.gray300, fontWeight: '600' },
+  reconfirmButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+    marginTop: spacing.xxs,
+  },
+  reconfirmButtonsText: { ...typography.caption, color: colors.gray400 },
+  reconfirmChip: {
+    backgroundColor: colors.statusConfirmedBg,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  reconfirmChipText: {
+    ...typography.caption,
+    color: colors.statusConfirmed,
+    fontWeight: '600',
+    fontSize: 10,
+  },
   // Inbound not-recognized bar — amber: bot no entendio el mensaje
   notRecognizedBar: {
     flexDirection: 'row',
