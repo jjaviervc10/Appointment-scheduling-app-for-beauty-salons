@@ -68,7 +68,7 @@ export default function MiniAppSuccessScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.content}>
         <View style={styles.logoWrap}>
-          <Image source={require('../../assets/LogoJL.png')} style={styles.logo} resizeMode="contain" />
+          <Image source={require('../../assets/logo-whatsapp.png')} style={styles.logo} resizeMode="contain" />
         </View>
 
         <View style={styles.card}>

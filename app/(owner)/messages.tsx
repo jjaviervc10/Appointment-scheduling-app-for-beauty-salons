@@ -205,8 +205,14 @@ export default function MessagesScreen() {
       const statusFilter = outFilter === 'read' || outFilter === 'failed' ? outFilter : undefined;
       const response = await getOwnerMessages({ status: statusFilter, page: 1, limit: PAGE_SIZE });
 
-      // Exclude 'general' bot auto-responses — show only booking-linked notifications.
-      const bookingMessages = response.data.filter((msg) => msg.messageType !== 'general');
+      // Exclude plain-text 'general' bot auto-responses — keep booking notifications AND
+      // 'general' messages that carry a structured payload (brand image or interactive CTA).
+      const bookingMessages = response.data.filter(
+        (msg) =>
+          msg.messageType !== 'general' ||
+          msg.metadata?.imagePayload != null ||
+          msg.metadata?.interactivePayload != null,
+      );
       const bookingSummary: OwnerMessagesSummary = {
         total: bookingMessages.length,
         pending: bookingMessages.filter((m) => m.status === 'pending').length,
@@ -450,6 +456,29 @@ export default function MessagesScreen() {
                   <Text style={styles.messageType}>
                     {OUTBOUND_TYPE_LABELS[msg.messageType] ?? msg.messageType}
                   </Text>
+                  {/* ── Payload badges ─────────────────────────────────────── */}
+                  {msg.metadata?.imagePayload ? (
+                    <View style={styles.payloadBadge}>
+                      <Ionicons name="image-outline" size={13} color={colors.info} />
+                      <Text style={styles.payloadBadgeText}>
+                        Imagen de marca{msg.metadata.imagePayload.caption ? `: ${msg.metadata.imagePayload.caption}` : ''}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {msg.metadata?.interactivePayload ? (
+                    <View style={styles.payloadBadge}>
+                      <Ionicons name="radio-button-on-outline" size={13} color={colors.gold} />
+                      <Text style={styles.payloadBadgeText}>
+                        {msg.metadata.interactivePayload.type === 'cta_url' ? 'Boton CTA' :
+                          msg.metadata.interactivePayload.type === 'button' ? 'Botones de respuesta' :
+                          msg.metadata.interactivePayload.type === 'list' ? 'Lista interactiva' :
+                          'Interactivo'}
+                        {msg.metadata.interactivePayload.action?.parameters?.display_text
+                          ? ` — "${msg.metadata.interactivePayload.action.parameters.display_text}"`
+                          : ''}
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.messageBody} numberOfLines={2}>{msg.body}</Text>
                   {msg.appointment ? (
                     <Text style={styles.messageMeta} numberOfLines={1}>
@@ -1048,6 +1077,20 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   attentionText: { ...typography.caption, color: colors.error, fontWeight: '600' },
+  // Outbound payload badge — shown when message carries imagePayload or interactivePayload
+  payloadBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xxs,
+    backgroundColor: colors.gray800,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.gray700,
+  },
+  payloadBadgeText: { ...typography.caption, color: colors.gray300, fontWeight: '600' },
   // Inbound not-recognized bar — amber: bot no entendio el mensaje
   notRecognizedBar: {
     flexDirection: 'row',

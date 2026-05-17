@@ -389,7 +389,7 @@ function BrandHeader({ onExit }: { onExit: () => void }) {
   return (
     <View style={styles.brandHeader}>
       <View style={styles.logoWrap}>
-        <Image source={require('../../assets/LogoJL.png')} style={styles.logo} resizeMode="contain" />
+        <Image source={require('../../assets/logo-whatsapp.png')} style={styles.logo} resizeMode="contain" />
       </View>
       <View style={styles.brandCopy}>
         <Text style={styles.brandName}>Jaquelina Lopez</Text>
