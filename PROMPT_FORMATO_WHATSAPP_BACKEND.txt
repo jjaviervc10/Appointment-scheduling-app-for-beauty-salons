@@ -1,0 +1,522 @@
+===============================================================================
+PROMPT PARA BACKEND ENGINEER — MEJORA FORMATO MENSAJES WHATSAPP
+Proyecto: Jaquelina López Barber Studio
+Repo backend: Express + Railway (separado del frontend)
+Fecha: 2025
+===============================================================================
+
+Eres un senior backend engineer trabajando en el backend Express de este proyecto.
+El backend ya está funcionando en Railway. Los mensajes WhatsApp ya se envían
+correctamente (dry-run desactivado, worker activo).
+
+El objetivo de esta tarea es MEJORAR EL FORMATO de los mensajes salientes de
+WhatsApp para que sean más claros, profesionales y con mejor experiencia para el
+cliente. No cambiamos proveedor, no conectamos IA, no modificamos la base de datos
+salvo que sea estrictamente necesario.
+
+===============================================================================
+FASE 1 — INSPECCIÓN: ENCONTRAR DÓNDE SE CONSTRUYE EL TEXTO
+===============================================================================
+
+Antes de hacer cualquier cambio, inspeccioná estos archivos o sus equivalentes
+en tu estructura de carpetas:
+
+1. El handler/controlador del webhook de WhatsApp inbound.
+   Buscar: `inbound`, `webhook`, `message`, `whatsapp`
+   Ejemplo de paths posibles:
+   - routes/whatsapp.ts
+   - controllers/whatsapp.controller.ts
+   - controllers/webhookController.ts
+
+2. El servicio que detecta intenciones del mensaje entrante.
+   Buscar: función que recibe el body del mensaje y devuelve un intent como
+   'booking', 'greeting', 'price', 'reschedule', 'cancel', 'unknown', etc.
+   Ejemplo de paths posibles:
+   - services/whatsapp/intentService.ts
+   - services/whatsapp/inboundMessageService.ts
+
+3. El servicio o módulo que construye el texto de la respuesta.
+   Este es el archivo principal a modificar.
+   Buscar: función que toma un intent y devuelve un string con el body del mensaje.
+   Ejemplo de paths posibles:
+   - services/whatsapp/responseBuilder.ts
+   - services/whatsapp/outboundMessageService.ts
+   - utils/whatsappMessages.ts
+
+4. El servicio de mensajes salientes (outbound).
+   Buscar: función que guarda en `outbound_messages` y llama a la Cloud API.
+   Ejemplo de paths posibles:
+   - services/whatsapp/outboundService.ts
+   - services/messageService.ts
+
+5. El lugar donde se construyen links a la mini app.
+   Buscar: uso de MINIAPP_BASE_URL, FRONTEND_URL, construcción de URL con
+   phone, token, returnUrl, etc.
+   Puede estar inline en el response builder.
+
+Reportá al inicio de tu respuesta:
+
+A. La ruta exacta de cada archivo relevante encontrado.
+B. La firma de la función que construye el body del mensaje (parámetros y retorno).
+C. Si ya existe una función centralizada para armar links de mini app, o si los
+   links están hardcodeados/inline.
+D. Los intents actuales que el sistema reconoce (lista completa).
+E. El valor actual de MINIAPP_BASE_URL o la variable equivalente.
+F. Si los mensajes actuales usan texto plano o ya tienen algún formato.
+
+===============================================================================
+FASE 2 — IMPLEMENTAR: CENTRALIZAR BUILDER Y MEJORAR FORMATOS
+===============================================================================
+
+---------------------------------------
+PASO 2A — CREAR FUNCIÓN buildMiniAppLink
+---------------------------------------
+
+En el mismo módulo donde se construyen mensajes (o en un utils/ dedicado),
+creá (o reemplazá si ya existe) una función con esta firma:
+
+```ts
+interface MiniAppLinkOptions {
+  intent: 'booking' | 'reschedule' | 'cancel' | 'availability' | 'services';
+  phone?: string;      // E.164, ej: +526143278357
+  token?: string;      // token de un solo uso (solo para reschedule/cancel)
+  returnTo?: string;   // por defecto 'whatsapp'
+  source?: string;     // por defecto 'whatsapp'
+}
+
+function buildMiniAppLink(options: MiniAppLinkOptions): string {
+  const base = process.env.MINIAPP_BASE_URL || process.env.FRONTEND_URL;
+  if (!base) throw new Error('MINIAPP_BASE_URL not configured');
+
+  const routes: Record<string, string> = {
+    booking:      '/miniapp/booking',
+    reschedule:   '/miniapp/reschedule',
+    cancel:       '/miniapp/cancel',
+    availability: '/miniapp/booking',    // mismo booking, mismo flow
+    services:     '/miniapp/booking',    // mismo booking, misma pantalla de servicios
+  };
+
+  const params = new URLSearchParams();
+  if (options.phone)    params.set('phone',    options.phone);
+  if (options.token)    params.set('token',    options.token);
+  params.set('source',   options.source   ?? 'whatsapp');
+  params.set('returnTo', options.returnTo ?? 'whatsapp');
+
+  const path = routes[options.intent] ?? '/miniapp/booking';
+  const query = params.toString();
+  return `${base.replace(/\/$/, '')}${path}?${query}`;
+}
+```
+
+Reglas:
+- `source=whatsapp` siempre para links generados por el bot (tracking futuro).
+- `returnTo=whatsapp` para que la mini app muestre el botón "Volver al chat".
+- `phone` encodeado automáticamente por URLSearchParams (+→%2B).
+- `token` solo cuando sea reschedule o cancel (el token tiene la cita activa).
+- No exponer ni logguear tokens en logs de debug.
+
+---------------------------------------
+PASO 2B — REEMPLAZAR BODIES DE MENSAJES
+---------------------------------------
+
+En el response builder (archivo encontrado en Fase 1 / paso 3), reemplazá
+los textos de respuesta por los siguientes formatos exactos.
+
+IMPORTANTE sobre formato WhatsApp:
+- `*texto*` → negrita (SOPORTADO en WhatsApp)
+- `_texto_` → cursiva (SOPORTADO)
+- Saltos de línea: `\n` (en strings JS)
+- Sin HTML. Sin Markdown estándar (# headers no funcionan).
+- Máximo 2-3 emojis por mensaje. No más.
+- El link siempre después de una línea de CTA, nunca solo.
+
+---------------------------------------
+FORMATOS EXACTOS POR INTENT
+---------------------------------------
+
+INTENT: greeting (primera interacción, "hola", nombre del negocio, etc.)
+
+```
+✂️ *Jaquelina López Barber Studio*
+
+Hola, soy el asistente del estudio.
+¿En qué te puedo ayudar?
+
+1️⃣ Agendar cita
+2️⃣ Ver horarios disponibles
+3️⃣ Reprogramar cita
+4️⃣ Cancelar cita
+5️⃣ Hablar con el estudio
+
+Responde con el número de la opción.
+```
+
+INTENT: booking (quiere agendar, opciones "1", "cita", "reservar", etc.)
+
+Variables necesarias: phone del cliente, link a mini app booking
+
+```
+✂️ *Jaquelina López Barber Studio*
+
+¡Hola! Te ayudo a reservar tu cita.
+
+Para elegir tu servicio, día y horario toca aquí:
+
+👉 *Reservar mi cita*
+{MINIAPP_LINK}
+
+Tu solicitud quedará pendiente de aprobación.
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'booking', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: availability (ver horarios disponibles, opción "2")
+
+Variables necesarias: phone del cliente
+
+```
+✂️ *Jaquelina López Barber Studio*
+
+Puedes ver los horarios disponibles y agendar directamente aquí:
+
+👉 *Ver disponibilidad*
+{MINIAPP_LINK}
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'availability', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: reschedule (reprogramar, opción "3")
+
+Variables necesarias: phone del cliente, token de la cita activa (si existe)
+Si no hay cita activa, usar booking link normal con un aviso.
+
+```
+🔁 *Reprogramar cita*
+
+Para elegir un nuevo horario toca aquí:
+
+👉 *Reprogramar mi cita*
+{MINIAPP_LINK}
+
+El cambio quedará pendiente de confirmación.
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'reschedule', phone, token, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: cancel (cancelar, opción "4")
+
+Variables necesarias: phone del cliente, token de la cita activa (si existe)
+
+```
+❌ *Cancelar cita*
+
+Para cancelar tu cita toca aquí:
+
+👉 *Cancelar mi cita*
+{MINIAPP_LINK}
+
+Solo puedes cancelar hasta 2 horas antes de tu cita.
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'cancel', phone, token, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: human_help (emergencia, opción "5", necesito hablar con alguien)
+
+Variables necesarias: process.env.EMERGENCY_CALL_PHONE
+
+```
+📞 *Cita de emergencia*
+
+Entiendo que necesitas atención urgente.
+
+Por favor usa esta opción solo si realmente lo necesitas.
+Mis horarios son limitados y este espacio es para verdaderas emergencias.
+
+Puedes llamarme directamente aquí:
+*{EMERGENCY_CALL_PHONE}*
+
+Solo llamadas directas. No se agenda por este canal.
+```
+
+Si EMERGENCY_CALL_PHONE no está configurado, usar:
+
+```
+📞 *Contacto directo*
+
+Para consultas urgentes o emergencias, por favor responde indicando tu nombre
+completo y te contactaremos a la brevedad.
+```
+
+INTENT: price (precios, servicios, "cuánto cuesta", "qué servicios ofrecen")
+
+```
+💈 *Servicios y precios*
+
+Puedes consultar los servicios disponibles aquí:
+
+👉 *Ver servicios*
+{MINIAPP_LINK}
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'services', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: hours (horarios, "a qué hora abren", "cuándo atienden")
+
+```
+🕐 *Horarios del estudio*
+
+Los horarios actualizados están en:
+
+👉 *Ver disponibilidad*
+{MINIAPP_LINK}
+```
+
+Donde {MINIAPP_LINK} = buildMiniAppLink({ intent: 'availability', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+
+INTENT: location (ubicación, "dónde están", "cómo llego")
+
+Variable necesaria: process.env.BUSINESS_ADDRESS (si está configurada)
+
+```
+📍 *Ubicación del estudio*
+
+{BUSINESS_ADDRESS}
+
+Puedes coordinar tu cita aquí:
+
+👉 *Agendar cita*
+{MINIAPP_LINK}
+```
+
+Si BUSINESS_ADDRESS no está configurado, omitir esa línea y el salto de línea.
+
+INTENT: unknown (mensaje no reconocido)
+
+```
+No logré identificar tu mensaje.
+
+Puedes responder con:
+1️⃣ Agendar cita
+2️⃣ Ver horarios
+3️⃣ Reprogramar
+4️⃣ Cancelar
+5️⃣ Hablar con el estudio
+```
+
+NO incluir links externos en la respuesta unknown.
+NO ejecutar ninguna acción peligrosa.
+NO revelar información interna.
+
+---------------------------------------
+MENSAJES OUTBOUND AUTOMÁTICOS (notificaciones)
+---------------------------------------
+
+Estos no se disparan por respuesta al cliente sino por eventos internos
+(cita solicitada, aprobada, rechazada, recordatorio).
+
+TIPO: confirmation (se envía cuando el cliente hace un booking request)
+
+Variables: clientName, serviceName
+
+```
+✂️ *Jaquelina López Barber Studio*
+
+Hola {clientName}, recibimos tu solicitud de cita para *{serviceName}*.
+
+La revisaremos y te confirmaremos pronto por aquí.
+```
+
+TIPO: owner_approval_result — APROBADO
+
+Variables: clientName, serviceName, date (dd/MM/yyyy), time (HH:mm), phone
+
+```
+✅ *Cita aprobada*
+
+Hola {clientName}, tu cita para *{serviceName}* fue aprobada.
+
+📅 *{date}*
+🕐 *{time}*
+
+Te esperamos.
+```
+
+TIPO: owner_approval_result — RECHAZADO
+
+Variables: clientName, serviceName, reason (opcional), phone
+
+```
+❌ *Cita no disponible*
+
+Hola {clientName}, lamentablemente no podemos confirmar tu cita para *{serviceName}*.
+
+{reason}
+
+Si quieres intentar con otro horario:
+
+👉 *Agendar nueva cita*
+{MINIAPP_LINK}
+```
+
+Si reason está vacío, omitir esa línea.
+{MINIAPP_LINK} = buildMiniAppLink({ intent: 'booking', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+
+TIPO: reminder (24h antes de la cita)
+
+Variables: clientName, serviceName, time (HH:mm), phone
+
+```
+📅 *Recordatorio de cita*
+
+Hola {clientName}, te recordamos que mañana tienes cita para *{serviceName}*.
+
+🕐 *{time}*
+
+Si necesitas cambiarla:
+
+👉 *Reprogramar o cancelar*
+{MINIAPP_LINK}
+```
+
+{MINIAPP_LINK} = buildMiniAppLink({ intent: 'booking', phone, source: 'whatsapp', returnTo: 'whatsapp' })
+(No necesita token para este caso ya que abre el flow de booking general.)
+
+===============================================================================
+FASE 3 — VERIFICACIÓN Y PRUEBAS
+===============================================================================
+
+Después de implementar, verificar lo siguiente:
+
+---------------------------------------
+PASO 3A — VERIFICAR MODO TEST ACTIVO
+---------------------------------------
+
+```bash
+curl https://striking-caring-production.up.railway.app/api/owner/messages/diagnostics \
+  -H "Authorization: Bearer dev-owner-secret"
+```
+
+Confirmar en la respuesta:
+- dryRun: false
+- mode: 'test'
+- workerEnabled: true
+- allowedPhones incluye +5216143278357
+
+---------------------------------------
+PASO 3B — ENVIAR MENSAJES DE PRUEBA
+---------------------------------------
+
+Desde el número de WhatsApp +5216143278357 (número autorizado de prueba),
+enviar los siguientes mensajes al bot y verificar las respuestas:
+
+| Mensaje enviado       | Intent esperado  | ¿Tiene link?  | ¿Tiene CTA en negrita? |
+|-----------------------|------------------|---------------|------------------------|
+| hola                  | greeting         | No            | No aplica              |
+| quiero una cita       | booking          | Sí            | *Reservar mi cita*     |
+| 1                     | booking          | Sí            | *Reservar mi cita*     |
+| cuánto cuesta         | price            | Sí            | *Ver servicios*        |
+| 2                     | availability     | Sí            | *Ver disponibilidad*   |
+| 3                     | reschedule       | Sí            | *Reprogramar mi cita*  |
+| 4                     | cancel           | Sí            | *Cancelar mi cita*     |
+| 5                     | human_help       | No (teléfono) | *{phone}*              |
+| qué horas             | hours            | Sí            | *Ver disponibilidad*   |
+| dónde están           | location         | Sí            | *Agendar cita*         |
+| texto libre extraño   | unknown          | No            | No aplica              |
+
+---------------------------------------
+PASO 3C — VERIFICAR EN BASE DE DATOS
+---------------------------------------
+
+Confirmar que el body guardado en outbound_messages contiene el texto formateado:
+
+```sql
+SELECT id, message_type, delivery_status, LEFT(body, 300) as body_preview, sent_at
+FROM booking.outbound_messages
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+El body debe contener negritas en formato WhatsApp (*texto*) y emojis.
+El link debe incluir source=whatsapp y returnTo=whatsapp en los query params.
+
+---------------------------------------
+PASO 3D — VERIFICAR EN WHATSAPP DEL CLIENTE
+---------------------------------------
+
+El número +5216143278357 debe recibir en WhatsApp:
+- Negritas renderizadas visualmente.
+- Emojis visibles.
+- Link tappable.
+- Al tocar el link, la mini app se abre en Chrome Custom Tab.
+- Al terminar la mini app o presionar atrás, el usuario regresa a WhatsApp.
+
+===============================================================================
+REGLAS Y RESTRICCIONES
+===============================================================================
+
+NO HACER:
+- No conectar ninguna IA externa (OpenAI, Anthropic, Gemini, etc.).
+- No cambiar de proveedor WhatsApp.
+- No enviar mensajes masivos ni broadcast.
+- No desactivar el modo test ni quitar la allowlist.
+- No hardcodear tokens de API en el código.
+- No exponer secretos en logs de producción.
+- No tocar la lógica de citas (appointments), servicios ni disponibilidad.
+- No modificar la base de datos salvo columna explícitamente necesaria.
+- No enviar links en respuestas de intent 'unknown'.
+- No revelar información interna del sistema en mensajes al cliente.
+- No hacer cambios que rompan el dry-run switch.
+
+SÍ HACER:
+- Centralizar todos los textos de respuesta en un solo módulo.
+- Usar buildMiniAppLink() en todos los lugares donde se construya un link.
+- Mantener dry-run funcional (si está activo, el texto se guarda pero no se envía).
+- Mantener el log de outbound_messages con el body real que se enviaría.
+- Seguir respetando la allowlist de teléfonos en modo test.
+- Mantener compatibilidad con los endpoints existentes del frontend.
+
+===============================================================================
+ENTREGABLES ESPERADOS
+===============================================================================
+
+1. Lista de archivos modificados con ruta exacta y descripción del cambio.
+2. La función buildMiniAppLink() implementada y ubicación.
+3. Ejemplo antes/después de un mensaje 'booking' con el formato mejorado.
+4. Ejemplo antes/después de un mensaje 'greeting' con el formato mejorado.
+5. Confirmación de que dry-run sigue funcionando correctamente.
+6. Output de la tabla outbound_messages con los nuevos bodies formateados.
+7. Screenshot o descripción de cómo se ve el mensaje en WhatsApp del cliente.
+8. Si encontrás intents que NO están en la lista de arriba, reportarlos.
+9. Pasos para probar un ciclo completo: mensaje → intent → respuesta → WhatsApp.
+
+===============================================================================
+CONTEXTO ADICIONAL DEL PROYECTO
+===============================================================================
+
+- Frontend: React Native + Expo, desplegado en Netlify
+  URL: https://barberjaquelinalopezstudio.netlify.app
+- Backend: Express + TypeScript, desplegado en Railway
+  URL: https://striking-caring-production.up.railway.app
+- Base de datos: Supabase PostgreSQL, schema 'booking'
+  Tablas relevantes: outbound_messages, inbound_messages, notification_events
+- WhatsApp Cloud API: WHATSAPP_MODE=test, WHATSAPP_DRY_RUN=false
+- Worker: activo, intervalo 30 segundos, procesa pending en outbound_messages
+- Número de prueba autorizado: +5216143278357
+- Número de WhatsApp del negocio: +5216143278357 (mismo en pruebas)
+
+Mini apps disponibles en el frontend:
+- /miniapp/booking?phone=&source=&returnTo=&token= → wizard de reserva
+- /miniapp/reschedule?token=&source=&returnTo= → reprogramar cita
+- /miniapp/cancel?token=&source=&returnTo= → cancelar cita
+- /miniapp/success → pantalla de éxito (sin parámetros propios)
+
+La mini app se abre en Chrome Custom Tab en Android (desde WhatsApp).
+El parámetro returnTo=whatsapp hace que la mini app muestre el botón
+"Volver al chat de WhatsApp" al terminar el flujo.
+
+Documentación de formatos y fases futuras:
+- docs/whatsapp-message-format.md en el repo del frontend
+
+===============================================================================
+FIN DEL PROMPT
+===============================================================================
