@@ -262,9 +262,18 @@ export default function MiniAppBookingScreen() {
     void loadAvailability();
   }, [loadAvailability]);
 
+  const [showExitHint, setShowExitHint] = useState(false);
+
   const handleReturnToWhatsApp = useCallback(() => {
-    void returnToWhatsApp(whatsappReturnUrl);
-  }, [whatsappReturnUrl]);
+    // Prefer explicit returnUrl. If absent, fall back to wa.me/<phone> so
+    // the user lands on the correct chat instead of WhatsApp Home.
+    const phoneDigits = phone.trim().replace(/\D/g, '');
+    const target =
+      whatsappReturnUrl ||
+      (phoneDigits ? `https://wa.me/${phoneDigits}` : undefined);
+    void returnToWhatsApp(target);
+    setTimeout(() => setShowExitHint(true), 2500);
+  }, [whatsappReturnUrl, phone]);
 
   useMiniAppExitGuard(handleReturnToWhatsApp);
 
@@ -413,7 +422,7 @@ export default function MiniAppBookingScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.appShell}>
-          <BrandHeader onExit={handleReturnToWhatsApp} />
+          <BrandHeader onExit={handleReturnToWhatsApp} showHint={showExitHint} />
           <Progress current={currentStepIndex} />
 
           {formError ? <Text style={styles.errorBanner}>{formError}</Text> : null}
@@ -793,20 +802,27 @@ export default function MiniAppBookingScreen() {
   );
 }
 
-function BrandHeader({ onExit }: { onExit: () => void }) {
+function BrandHeader({ onExit, showHint }: { onExit: () => void; showHint?: boolean }) {
   return (
-    <View style={styles.brandHeader}>
-      <View style={styles.logoWrap}>
-        <Image source={require('../../assets/logo-whatsapp.png')} style={styles.logo} resizeMode="contain" />
+    <View>
+      <View style={styles.brandHeader}>
+        <View style={styles.logoWrap}>
+          <Image source={require('../../assets/logo-whatsapp.png')} style={styles.logo} resizeMode="contain" />
+        </View>
+        <View style={styles.brandCopy}>
+          <Text style={styles.brandName}>Jaquelina López</Text>
+          <Text style={styles.brandMeta}>Barber Studio</Text>
+        </View>
+        <TouchableOpacity style={styles.exitBtn} onPress={onExit} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={14} color={colors.gray400} />
+          <Text style={styles.exitText}>Salir</Text>
+        </TouchableOpacity>
       </View>
-      <View style={styles.brandCopy}>
-        <Text style={styles.brandName}>Jaquelina López</Text>
-        <Text style={styles.brandMeta}>Barber Studio</Text>
-      </View>
-      <TouchableOpacity style={styles.exitBtn} onPress={onExit} activeOpacity={0.7}>
-        <Ionicons name="arrow-back" size={14} color={colors.gray400} />
-        <Text style={styles.exitText}>Salir</Text>
-      </TouchableOpacity>
+      {showHint ? (
+        <Text style={styles.exitHint}>
+          Si WhatsApp no se abrió automáticamente, vuelve manualmente al chat.
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -979,6 +995,7 @@ const styles = StyleSheet.create({
   brandCopy: { flex: 1 },
   brandName: { ...typography.subtitle, color: colors.white },
   brandMeta: { ...typography.bodySmall, color: colors.gold },
+  exitHint: { ...typography.caption, color: colors.gray400, textAlign: 'center', paddingBottom: spacing.xs },
   progressBox: {
     backgroundColor: colors.gray900,
     borderRadius: radii.md,
