@@ -98,23 +98,36 @@ En mini app no hay fallback mock silencioso cuando falla backend:
 		- `Solicitud enviada`
 		- `Tu cita queda pendiente de aprobacion`
 		- `Te avisaremos por WhatsApp cuando sea aprobada`
-		- Boton `Volver a WhatsApp` si `returnTo=whatsapp`; de lo contrario `Volver al chat de WhatsApp`.
+		- Boton `Volver al chat de WhatsApp` si `returnTo=whatsapp`; de lo contrario `Finalizar`.
+		- Texto de ayuda (aparece 2.5 s despues): `Si WhatsApp no se abre automaticamente, vuelve manualmente al chat.`
 
 ## 4) Intent y parámetros WhatsApp CTA
 
 El backend WhatsApp envía links con `intent` y `returnTo` para contextualizar la mini app.
 
-### Parámetros soportados
+### Parámetros soportados por `/miniapp/booking`
 
 | Parámetro | Valores | Efecto |
 |---|---|---|
 | `intent` | `booking` (default) | Título: "Agenda tu cita", helper: "Es rápido y fácil" |
 | `intent` | `availability` | Título: "Horarios disponibles", helper: "Elige un servicio para ver horarios" |
 | `intent` | `reschedule` | Título: "Reprogramar cita", helper: "Elige un nuevo horario disponible" |
-| `returnTo` | `whatsapp` | En success: botón "Volver a WhatsApp" que abre `wa.me/{phone}` |
-| `phone` | E.164 url-encoded | Prellena el campo celular (editable) |
+| `returnTo` | `whatsapp` | En success: botón "Volver al chat de WhatsApp"; se reenvía a success |
+| `returnUrl` | URL wa.me o whatsapp:// | Deep-link explícito de vuelta a WhatsApp; prioridad sobre phone |
+| `phone` | E.164 url-encoded (`%2B52...`) | Prellena el campo celular (editable); se reenvía a success para construir wa.me link |
 | `fullName` | url-encoded | Prellena el campo nombre (editable) |
 | `token` | uuid | Token de un solo uso para flujos con cita activa |
+
+### Parámetros soportados por `/miniapp/success`
+
+El componente success recibe estos parámetros (enviados automáticamente por booking tras completar la solicitud):
+
+| Parámetro | Origen | Uso |
+|---|---|---|
+| `appointmentId` | Backend response | Muestra folio de la solicitud |
+| `phone` | Reenviado desde booking | Construye `https://wa.me/{digits}` para el botón |
+| `returnTo` | Reenviado desde booking | `whatsapp` → botón "Volver al chat de WhatsApp" |
+| `returnUrl` | Reenviado desde booking | Deep-link explícito; prioridad sobre phone para construir la URL |
 
 ### Ejemplos de links desde WhatsApp CTA
 
@@ -154,11 +167,26 @@ Pendiente para fase futura:
 - El backend debe generar un token de un solo uso válido por 24 h para el link.
 - El TODO está marcado en código en `booking.tsx` step `schedule`.
 
-### Comportamiento returnTo=whatsapp en success
+### Comportamiento del botón "Volver al chat de WhatsApp" en success
 
-1. Si `returnTo=whatsapp` y `phone` disponible: abre `https://wa.me/{digits}` via `Linking`.
-2. Si `Linking.canOpenURL` devuelve `false` (web sin WhatsApp instalado): muestra texto fallback "Puedes volver manualmente al chat de WhatsApp".
-3. Si no hay `returnTo=whatsapp`: usa el comportamiento anterior (`returnToWhatsApp(returnUrl)`).
+El botón llama a `returnToWhatsApp(target)` del hook `useMiniAppExitGuard`.
+La función `buildWhatsAppTarget()` determina el target con esta prioridad:
+
+1. **`returnUrl` / `waReturnUrl`** — deep-link explícito enviado por el backend (ej. `https://wa.me/526141234567`).
+2. **`phone`** — se normaliza a solo dígitos y se construye `https://wa.me/{digits}`.
+3. **(ninguno)** — abre `whatsapp://` genérico (abre WhatsApp sin chat específico).
+
+En web (Chrome Custom Tab desde WhatsApp), `returnToWhatsApp` usa `openViaAnchor()` — crea un `<a>` oculto y simula click — lo que activa el intent del sistema sin llamar `window.open()` (que Chrome Custom Tab bloquea).
+
+Si el usuario sigue en la página 2.5 s después de presionar el botón, aparece el texto de ayuda:
+> *Si WhatsApp no se abre automáticamente, vuelve manualmente al chat.*
+
+### Limitaciones conocidas
+
+- **No se puede volver al chat exacto**: WhatsApp no expone una URL que abra directamente un hilo de conversación específico desde un navegador externo. `wa.me/{phone}` abre una nueva conversación o el chat existente según el dispositivo.
+- **Chrome Custom Tab no permite `window.open()`**: Por eso se usa la técnica de anchor click. `Linking.openURL()` de React Native Web falla silenciosamente en este contexto.
+- **iOS Safari / navegadores de escritorio**: `whatsapp://` requiere que WhatsApp esté instalado. Si no lo está, el navegador puede mostrar un error de URL no reconocida — el hint de texto aparece para este caso.
+- **Deep-link con chat exacto**: Solo es posible si el backend genera un `returnUrl` apuntando a `https://wa.me/{phone}` con el número correcto, lo que el bot ya hace cuando envía el link de la mini app.
 
 ## 6) Ejemplos de links
 

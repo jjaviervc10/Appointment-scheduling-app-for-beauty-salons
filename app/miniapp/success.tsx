@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Image, Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
@@ -10,9 +10,26 @@ function firstParam(value: string | string[] | undefined): string {
   return value ?? '';
 }
 
-/** Normalise a phone string to digits-only for wa.me (strips +, spaces, dashes). */
+/** Strip all non-digit characters so the phone can be appended to a wa.me URL. */
 function normalizePhoneForWaMe(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+/**
+ * Build the best WhatsApp URL available from the params passed to success.
+ *
+ * Priority:
+ *  1. returnUrl / waReturnUrl — an explicit deep-link supplied by the backend
+ *  2. phone               — construct https://wa.me/<digits>
+ *  3. (none)              — returnToWhatsApp() will fall back to whatsapp://
+ */
+function buildWhatsAppTarget(returnUrl: string, phone: string): string | undefined {
+  if (returnUrl) return returnUrl; // validated inside returnToWhatsApp/getSafeWhatsAppUrl
+  if (phone) {
+    const digits = normalizePhoneForWaMe(phone);
+    if (digits) return `https://wa.me/${digits}`;
+  }
+  return undefined;
 }
 
 export default function MiniAppSuccessScreen() {
@@ -23,6 +40,7 @@ export default function MiniAppSuccessScreen() {
     returnTo?: string | string[];
     phone?: string | string[];
   }>();
+
   const appointmentId = firstParam(params.appointmentId);
   const whatsappReturnUrl = firstParam(params.returnUrl).trim() || firstParam(params.waReturnUrl).trim();
   const returnTo = firstParam(params.returnTo).trim();
@@ -30,26 +48,19 @@ export default function MiniAppSuccessScreen() {
 
   const isWhatsAppReturn = returnTo === 'whatsapp';
 
-  const [waLinkFailed, setWaLinkFailed] = useState(false);
+  // Shown after 2.5 s if the user is still on the page (WhatsApp may not have opened).
+  const [showFallbackHint, setShowFallbackHint] = useState(false);
 
-  const handleReturnToWhatsApp = useCallback(async () => {
-    if (isWhatsAppReturn && phone) {
-      const digits = normalizePhoneForWaMe(phone);
-      const waUrl = `https://wa.me/${digits}`;
-      try {
-        const supported = await Linking.canOpenURL(waUrl);
-        if (supported) {
-          await Linking.openURL(waUrl);
-          return;
-        }
-      } catch {
-        // fall through to returnToWhatsApp
-      }
-      setWaLinkFailed(true);
-      return;
-    }
-    void returnToWhatsApp(whatsappReturnUrl);
-  }, [isWhatsAppReturn, phone, whatsappReturnUrl]);
+  const handleReturnToWhatsApp = useCallback(() => {
+    const target = buildWhatsAppTarget(whatsappReturnUrl, phone);
+    // returnToWhatsApp uses openViaAnchor on web (works in Chrome Custom Tab)
+    // and Linking.openURL on native. Both handle https://wa.me/ and whatsapp:// correctly.
+    void returnToWhatsApp(target);
+
+    // If the user is still on the page 2.5 s later, WhatsApp may not have opened.
+    // Show a hint so they know they can return manually.
+    setTimeout(() => setShowFallbackHint(true), 2500);
+  }, [whatsappReturnUrl, phone]);
 
   useMiniAppExitGuard(handleReturnToWhatsApp);
 
@@ -76,21 +87,21 @@ export default function MiniAppSuccessScreen() {
             </View>
           ) : null}
 
-          {waLinkFailed ? (
-            <View style={styles.fallbackBox}>
-              <Text style={styles.fallbackText}>Puedes volver manualmente al chat de WhatsApp</Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={styles.button}
-              onPress={() => void handleReturnToWhatsApp()}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.buttonText}>
-                {isWhatsAppReturn ? 'Volver a WhatsApp' : 'Volver al chat de WhatsApp'}
-              </Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleReturnToWhatsApp}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.buttonText}>
+              {isWhatsAppReturn ? 'Volver al chat de WhatsApp' : 'Finalizar'}
+            </Text>
+          </TouchableOpacity>
+
+          {showFallbackHint ? (
+            <Text style={styles.fallbackHint}>
+              Si WhatsApp no se abre automáticamente, vuelve manualmente al chat.
+            </Text>
+          ) : null}
         </View>
       </View>
     </SafeAreaView>
@@ -157,13 +168,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gold,
   },
   buttonText: { ...typography.button, color: colors.black },
-  fallbackBox: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.gray50,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.gray200,
-    padding: spacing.md,
+  fallbackHint: {
+    ...typography.caption,
+    color: colors.gray500,
+    textAlign: 'center',
+    lineHeight: 18,
   },
-  fallbackText: { ...typography.body, color: colors.gray600, textAlign: 'center' },
 });
