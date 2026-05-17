@@ -442,5 +442,126 @@ Devuelve:
    - failed = fallo real de envio
 
 ===============================================================================
+11. IMAGEN DE MARCA EN MENSAJES WHATSAPP (NUEVO - QA 16/05/2026)
+===============================================================================
+
+PROBLEMA DETECTADO:
+
+El bot envia mensajes de saludo con botones interactivos (Agendar cita,
+Ver horarios, Hablar) pero SIN imagen de marca. La imagen deberia aparecer
+en la parte superior del mensaje, como lo hace "Ayudas Dentales" (clinica
+que usa el mismo stack de WhatsApp Cloud API con header de imagen).
+
+CAUSA 1 - URL DE IMAGEN INESTABLE (ya corregida en frontend):
+
+Los archivos en `assets/` de Expo reciben un hash en cada build:
+
+   ANTES: assets/assets/logo-whatsapp.abc123.png   (URL inestable)
+
+El archivo `logo-whatsapp.png` fue copiado a `public/assets/` para que sea
+servido por Netlify como archivo estatico en una URL ESTABLE:
+
+   AHORA: https://barberjaquelinalopezstudio.netlify.app/assets/logo-whatsapp.png
+
+Esta es la URL correcta para `WHATSAPP_BRAND_IMAGE_URL` en Railway.
+
+CAUSA 2 - BACKEND NO INCLUYE HEADER EN EL MENSAJE INTERACTIVO:
+
+El backend envia el mensaje de saludo como `interactive` con buttons, pero
+sin el campo `header`. WhatsApp Cloud API soporta imagen como header en
+mensajes interactivos.
+
+CAMBIO REQUERIDO EN BACKEND:
+
+En la funcion que construye el payload del mensaje interactivo de saludo
+(y cualquier mensaje outbound que tenga `metadata.imagePayload`), agregar
+el campo `header` con la imagen:
+
+```json
+{
+  "messaging_product": "whatsapp",
+  "to": "<PHONE>",
+  "type": "interactive",
+  "interactive": {
+    "type": "button",
+    "header": {
+      "type": "image",
+      "image": {
+        "link": "https://barberjaquelinalopezstudio.netlify.app/assets/logo-whatsapp.png"
+      }
+    },
+    "body": {
+      "text": "Hola, soy el asistente del estudio de Jaquelina López.\n¿En qué te puedo ayudar?"
+    },
+    "action": {
+      "buttons": [
+        { "type": "reply", "reply": { "id": "AGENDAR", "title": "Agendar cita" } },
+        { "type": "reply", "reply": { "id": "HORARIOS", "title": "Ver horarios" } },
+        { "type": "reply", "reply": { "id": "HABLAR",   "title": "Hablar" } }
+      ]
+    }
+  }
+}
+```
+
+Si el mensaje es de tipo `list` en lugar de `button`, el campo `header`
+aplica exactamente igual:
+
+```json
+"header": {
+  "type": "image",
+  "image": {
+    "link": "https://barberjaquelinalopezstudio.netlify.app/assets/logo-whatsapp.png"
+  }
+}
+```
+
+REGLA PARA `metadata.imagePayload`:
+
+Si el mensaje en `booking.outbound_messages` tiene `metadata.imagePayload`:
+
+```json
+{
+  "imagePayload": {
+    "link": "https://barberjaquelinalopezstudio.netlify.app/assets/logo-whatsapp.png",
+    "caption": "Jaquelina López Barber Studio"
+  }
+}
+```
+
+El backend debe incluir ese `imagePayload.link` como header en el mensaje
+interactivo, o enviar un mensaje de imagen independiente antes del texto.
+
+VARIABLE DE ENTORNO CORRECTA EN RAILWAY:
+
+```txt
+WHATSAPP_BRAND_IMAGE_URL=https://barberjaquelinalopezstudio.netlify.app/assets/logo-whatsapp.png
+```
+
+NOTA: La extension es .png (NO .jpg como aparecia en ejemplos anteriores).
+
+REQUISITO DE META PARA IMAGENES EN WHATSAPP CLOUD API:
+
+- URL HTTPS publica (sin autenticacion)
+- Formato: JPEG o PNG
+- Tamano maximo: 5 MB
+- WhatsApp descarga la imagen desde la URL en el momento del envio
+- Si la URL no responde o da error, el mensaje falla con error de media
+
+PREGUNTAS PARA EL BACKEND (imagen):
+
+P1. El backend actualmente incluye `header.image` en los mensajes
+    interactivos cuando `WHATSAPP_BRAND_IMAGE_URL` esta configurado?
+
+P2. Si no, agregar esa logica en la funcion que construye el payload del
+    mensaje interactivo.
+
+P3. Para mensajes de tipo `text` (como confirmaciones), el backend debe
+    enviar primero un mensaje de imagen y luego el texto? O usar template?
+
+P4. Confirmar que despues del fix la imagen se vea en el chat de WhatsApp
+    del numero de prueba `+526143278357`.
+
+===============================================================================
 FIN DEL PROMPT
 ===============================================================================
