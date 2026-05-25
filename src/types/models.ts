@@ -14,6 +14,8 @@ export interface AppointmentViewModel {
   clientPhone: string;
   serviceId?: string;
   serviceName: string;
+  serviceDurationMinutes?: number;
+  customDurationMinutes?: number | null;
   durationMinutes: number;
   status: AppointmentStatus;
   startAt: Date;

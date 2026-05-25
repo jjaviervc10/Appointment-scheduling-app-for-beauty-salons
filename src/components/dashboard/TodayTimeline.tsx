@@ -490,6 +490,7 @@ function InlineActions({
 
 interface ActionBtnProps {
   label: string;
+  mobileLabel?: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   isMobile: boolean;

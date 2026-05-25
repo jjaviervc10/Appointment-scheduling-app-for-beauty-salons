@@ -19,6 +19,8 @@ export interface OwnerAppointmentRow {
   status: AppointmentStatus;
   requested_start_at: string;
   requested_end_at: string;
+  custom_duration_minutes?: number | null;
+  duration_minutes: number;
   notes: string | null;
   cancellation_reason: string | null;
   client_response_at?: string | null;
@@ -69,6 +71,8 @@ export interface OwnerClientAppointmentRow {
   status: AppointmentStatus;
   requested_start_at: string;
   requested_end_at: string;
+  custom_duration_minutes?: number | null;
+  duration_minutes?: number | null;
   notes: string | null;
   cancellation_reason: string | null;
   created_at: string;
@@ -183,6 +187,8 @@ export interface OwnerAppointmentMutationResult {
   status: AppointmentStatus;
   requested_start_at: string;
   requested_end_at: string;
+  custom_duration_minutes?: number | null;
+  duration_minutes?: number | null;
 }
 
 export interface OwnerMutationResponse {

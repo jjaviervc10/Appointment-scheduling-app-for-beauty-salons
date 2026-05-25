@@ -45,13 +45,17 @@ type ActiveTab = 'sent' | 'received';
 function mapMsgToApptViewModel(msg: OwnerInboundMessage): AppointmentViewModel | null {
   if (!msg.appointment) return null;
   const startAt = new Date(msg.appointment.requestedStartAt);
-  const endAt = new Date(startAt.getTime() + 45 * 60 * 1000); // fallback 45 min
+  const durationMinutes = msg.appointment.durationMinutes ?? 45;
+  const endAt = msg.appointment.requestedEndAt
+    ? new Date(msg.appointment.requestedEndAt)
+    : new Date(startAt.getTime() + durationMinutes * 60 * 1000);
   return {
     id: msg.appointment.id,
     clientName: msg.client?.fullName ?? msg.fromPhone,
     clientPhone: msg.client?.phone ?? msg.fromPhone,
     serviceName: msg.appointment.serviceName ?? 'Servicio',
-    durationMinutes: 45,
+    serviceDurationMinutes: msg.appointment.serviceDurationMinutes ?? durationMinutes,
+    durationMinutes,
     status: 'reschedule_required',
     startAt,
     endAt,

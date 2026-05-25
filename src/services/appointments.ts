@@ -17,6 +17,8 @@ import { formatLocalDateKey } from '../utils/date';
 function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel {
   const startAt = new Date(row.requested_start_at);
   const endAt = new Date(row.requested_end_at);
+  const fallbackDurationMinutes = Math.max(15, Math.round((endAt.getTime() - startAt.getTime()) / 60000));
+  const effectiveDurationMinutes = row.duration_minutes ?? fallbackDurationMinutes;
 
   return {
     id: row.id,
@@ -25,9 +27,9 @@ function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel 
     clientPhone: row.clients?.phone ?? '',
     serviceId: row.services?.id,
     serviceName: row.services?.name ?? 'Servicio',
-    durationMinutes:
-      row.services?.duration_minutes ??
-      Math.max(15, Math.round((endAt.getTime() - startAt.getTime()) / 60000)),
+    serviceDurationMinutes: row.services?.duration_minutes ?? effectiveDurationMinutes,
+    customDurationMinutes: row.custom_duration_minutes ?? null,
+    durationMinutes: effectiveDurationMinutes,
     status: row.status,
     startAt,
     endAt,

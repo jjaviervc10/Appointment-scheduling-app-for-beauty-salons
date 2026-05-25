@@ -224,10 +224,13 @@ export async function deleteWeekOverride(
   return response.deletedCount;
 }
 
-export async function approveOwnerAppointment(id: string): Promise<OwnerAppointmentMutationResult> {
+export async function approveOwnerAppointment(
+  id: string,
+  payload: { durationMinutes?: number; note?: string } = {}
+): Promise<OwnerAppointmentMutationResult> {
   const response = await apiRequest<OwnerMutationResponse>(`/api/owner/appointments/${encodeURIComponent(id)}/approve`, {
     method: 'POST',
-    body: {},
+    body: payload,
     requiresOwnerAuth: true,
   });
   return response.appointment;
@@ -272,6 +275,8 @@ export async function rescheduleOwnerAppointment(
     /** ISO 8601 with offset — visible slot chosen by owner (no buffers). Backend applies buffers.
      *  Omit to use Scenario B: only marks the appointment as reschedule_required without new slot. */
     newStartAt?: string;
+    /** Real appointment duration in minutes. Backend recalculates requested_end_at. */
+    durationMinutes?: number;
     /** Stored in cancellation_reason. Optional, max 500 chars. */
     reason?: string;
     /** Default true. Pass false to suppress notification_event creation. */

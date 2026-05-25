@@ -17,6 +17,7 @@ import { MOCK_APPOINTMENTS } from '../../services/mock-data';
 import { formatLocalDateKey, formatLocalDateTimeWithOffset } from '../../utils/date';
 import { rescheduleOwnerAppointment } from '../../services/ownerApi';
 import { getPublicAvailability } from '../../services/bookingApi';
+import { AppointmentDurationModal } from './AppointmentDurationModal';
 
 /** Result returned to the dashboard after a successful POST /reschedule */
 export interface RescheduleSimulationResult {
@@ -31,6 +32,9 @@ export interface RescheduleSimulationResult {
   requestedStartAt: string;
   /** From API response — requested_end_at including buffer_after */
   requestedEndAt: string;
+  /** Real duration confirmed by backend for the appointment */
+  durationMinutes?: number;
+  customDurationMinutes?: number | null;
 }
 
 interface Props {
@@ -108,6 +112,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
   const [reason, setReason] = useState('');
   const [notifyClient, setNotifyClient] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDurationModal, setShowDurationModal] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [availableSlots, setAvailableSlots] = useState<AvailableSlotMap>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
@@ -158,7 +163,12 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     };
   }, [availabilityWeekKey, appointment?.serviceId, visible]);
 
-  const handleReschedule = async () => {
+  const selectedStartAtForDuration = useMemo(() => {
+    if (!selectedDate || !selectedTime) return null;
+    return new Date(formatLocalDateTimeWithOffset(selectedDate, `${selectedTime}:00`));
+  }, [selectedDate, selectedTime]);
+
+  const submitReschedule = async (durationMinutes: number) => {
     if (!appointment || !selectedDate || !selectedTime) return;
     setIsSubmitting(true);
     setSubmitError(null);
@@ -169,6 +179,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     try {
       const result = await rescheduleOwnerAppointment(appointment.id, {
         newStartAt,
+        durationMinutes,
         reason: reason.trim() || undefined,
         notifyClient,
       });
@@ -179,15 +190,24 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
         newDate: selectedDate,
         requestedStartAt: result.requested_start_at,
         requestedEndAt: result.requested_end_at,
+        durationMinutes: result.duration_minutes ?? durationMinutes,
+        customDurationMinutes: result.custom_duration_minutes ?? null,
       });
       resetForm();
       onClose();
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Error al reprogramar. Intenta nuevamente.';
+      setShowDurationModal(false);
       setSubmitError(msg);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleReschedule = () => {
+    if (!appointment || !selectedDate || !selectedTime) return;
+    setSubmitError(null);
+    setShowDurationModal(true);
   };
 
   const resetForm = () => {
@@ -198,6 +218,7 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     setReason('');
     setNotifyClient(true);
     setIsSubmitting(false);
+    setShowDurationModal(false);
     setSubmitError(null);
   };
 
@@ -588,6 +609,18 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
             </TouchableOpacity>
           </View>
         </View>
+        <AppointmentDurationModal
+          visible={showDurationModal}
+          appointment={appointment}
+          startAt={selectedStartAtForDuration}
+          initialDurationMinutes={appointment.durationMinutes}
+          baseDurationMinutes={appointment.serviceDurationMinutes}
+          title="Duración al reprogramar"
+          confirmLabel="Confirmar y reprogramar"
+          isSubmitting={isSubmitting}
+          onCancel={() => setShowDurationModal(false)}
+          onConfirm={(durationMinutes) => void submitReschedule(durationMinutes)}
+        />
       </View>
     </Modal>
   );

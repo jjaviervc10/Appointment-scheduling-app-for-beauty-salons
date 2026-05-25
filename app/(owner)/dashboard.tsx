@@ -12,10 +12,12 @@ import { NewAppointmentModal } from '../../src/components/modals/NewAppointmentM
 import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
 import { IncidentModal } from '../../src/components/modals/IncidentModal';
 import { RescheduleModal, type RescheduleSimulationResult } from '../../src/components/modals/RescheduleModal';
+import { AppointmentDurationModal } from '../../src/components/modals/AppointmentDurationModal';
 import { KPIFilterModal } from '../../src/components/modals/KPIFilterModal';
 import type { AppointmentViewModel } from '../../src/types/models';
 import type { TimeBlock } from '../../src/types/database';
 import { fetchAppointmentsByDate, fetchAwaitingAppointments, fetchPendingAppointments, updateAppointmentStatus } from '../../src/services/appointments';
+import { approveOwnerAppointment } from '../../src/services/ownerApi';
 import { fetchTimeBlocks } from '../../src/services/availability';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
@@ -68,6 +70,7 @@ export default function DashboardScreen() {
   const [showBlockTime, setShowBlockTime] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [rescheduleId, setRescheduleId] = useState<string | null>(null);
+  const [approveDurationId, setApproveDurationId] = useState<string | null>(null);
   const [kpiFilter, setKpiFilter] = useState<KPIKey | null>(null);
   const [todayAppts, setTodayAppts] = useState<AppointmentViewModel[]>([]);
   const [pending, setPending] = useState<AppointmentViewModel[]>([]);
@@ -139,6 +142,7 @@ export default function DashboardScreen() {
     }
   }, [selectedDateStr]);
 
+
   const goToPrevDay = useCallback(() => {
     setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; });
   }, []);
@@ -206,7 +210,7 @@ export default function DashboardScreen() {
   }, [loadDashboardData]);
 
   const runAction = useCallback(
-    async (id: string, action: DashboardAction) => {
+    async (id: string, action: DashboardAction, options?: { durationMinutes?: number }) => {
       // Per-card loading: add this id to the working set (does not block other cards)
       setWorkingIds(prev => { const m = new Map(prev); m.set(id, action); return m; });
       setErrorMsg(null);
@@ -227,20 +231,33 @@ export default function DashboardScreen() {
 
       try {
         if (action === 'approve') {
-          await updateAppointmentStatus(id, 'confirmed_by_owner');
+          const result = await approveOwnerAppointment(id, {
+            durationMinutes: options?.durationMinutes,
+          });
           // Optimistic update: remove from pending immediately
           const approved = pending.find(a => a.id === id);
           if (approved) {
+            const updatedStartAt = new Date(result.requested_start_at);
+            const updatedEndAt = new Date(result.requested_end_at);
+            const updatedDuration = result.duration_minutes ?? options?.durationMinutes ?? approved.durationMinutes;
+            const updatedAppointment: AppointmentViewModel = {
+              ...approved,
+              status: 'confirmed_by_owner',
+              startAt: updatedStartAt,
+              endAt: updatedEndAt,
+              durationMinutes: updatedDuration,
+              customDurationMinutes: result.custom_duration_minutes ?? approved.customDurationMinutes ?? null,
+            };
             setPending(prev => prev.filter(a => a.id !== id));
-            if (formatLocalDateKey(approved.startAt) === todayStr) {
+            if (formatLocalDateKey(updatedStartAt) === todayStr) {
               // GET /today returns ALL statuses for today — the appointment may already be
               // in todayAppts as pending_owner_approval. Update in place to avoid duplicate.
               setTodayAppts(prev => {
                 const alreadyPresent = prev.some(a => a.id === id);
                 if (alreadyPresent) {
-                  return prev.map(a => a.id === id ? { ...a, status: 'confirmed_by_owner' } : a);
+                  return prev.map(a => a.id === id ? updatedAppointment : a);
                 }
-                return [...prev, { ...approved, status: 'confirmed_by_owner' }];
+                return [...prev, updatedAppointment];
               });
             }
           }
@@ -308,6 +325,28 @@ export default function DashboardScreen() {
       }
     },
     [loadDashboardData, pending, awaiting, todayStr, scheduleSilentRefetch]
+  );
+
+  const approveDurationAppointment = useMemo(
+    () => [...pending, ...todayAppts].find((item) => item.id === approveDurationId) ?? null,
+    [approveDurationId, pending, todayAppts]
+  );
+
+  const handleApprovePress = useCallback(
+    (id: string) => {
+      setApproveDurationId(id);
+    },
+    []
+  );
+
+  const handleApproveDurationConfirm = useCallback(
+    (durationMinutes: number) => {
+      if (!approveDurationId) return;
+      void runAction(approveDurationId, 'approve', { durationMinutes }).finally(() => {
+        setApproveDurationId(null);
+      });
+    },
+    [approveDurationId, runAction]
   );
 
   const confirmReject = useCallback(
@@ -397,6 +436,8 @@ export default function DashboardScreen() {
             ...rescheduled,
             startAt: newStart,
             endAt: newEnd,
+            durationMinutes: result.durationMinutes ?? rescheduled.durationMinutes,
+            customDurationMinutes: result.customDurationMinutes ?? rescheduled.customDurationMinutes ?? null,
             status: result.newStatus,
           };
           setTodayAppts(prev => {
@@ -438,7 +479,7 @@ export default function DashboardScreen() {
       scheduleSilentRefetch();
       setRescheduleId(null);
     },
-    [pending, awaiting, todayStr, scheduleSilentRefetch]
+    [pending, awaiting, selectedDateStr, scheduleSilentRefetch]
   );
 
   return (
@@ -468,6 +509,7 @@ export default function DashboardScreen() {
         {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
         {loading ? <Text style={styles.loadingText}>Sincronizando con backend...</Text> : null}
         {workingIds.size > 0 ? <Text style={styles.loadingText}>Aplicando {workingIds.size} cambio{workingIds.size > 1 ? 's' : ''}...</Text> : null}
+
 
         <KPIStats
           citasHoy={todayAppts.length}
@@ -502,7 +544,7 @@ export default function DashboardScreen() {
           workingIds={workingIds}
           activeFilter={timelineFilter}
           onFilterChange={setTimelineFilter}
-          onApprove={(id) => void runAction(id, 'approve')}
+          onApprove={handleApprovePress}
           onReject={confirmReject}
           onCancel={confirmCancel}
           onReschedule={(id) => setRescheduleId(id)}
@@ -544,6 +586,18 @@ export default function DashboardScreen() {
         appointment={[...pending, ...awaiting, ...todayAppts].find(a => a.id === rescheduleId) || null}
         onClose={() => setRescheduleId(null)}
         onSimulationComplete={handleRescheduleComplete}
+      />
+      <AppointmentDurationModal
+        visible={!!approveDurationId}
+        appointment={approveDurationAppointment}
+        startAt={approveDurationAppointment?.startAt}
+        initialDurationMinutes={approveDurationAppointment?.durationMinutes}
+        baseDurationMinutes={approveDurationAppointment?.serviceDurationMinutes}
+        title="Aceptar cita"
+        confirmLabel="Aceptar con duración"
+        isSubmitting={approveDurationId ? workingIds.get(approveDurationId) === 'approve' : false}
+        onCancel={() => setApproveDurationId(null)}
+        onConfirm={handleApproveDurationConfirm}
       />
       <KPIFilterModal
         visible={!!kpiFilter}

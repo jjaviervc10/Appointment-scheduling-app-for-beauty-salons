@@ -143,6 +143,9 @@ export interface OwnerInboundMessage {
   appointment: {
     id: string;
     requestedStartAt: string;
+    requestedEndAt?: string;
+    durationMinutes?: number;
+    serviceDurationMinutes?: number;
     serviceName: string | null;
   } | null;
   receivedAt: string;

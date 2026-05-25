@@ -433,6 +433,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function AppointmentHistoryRow({ appointment }: { appointment: OwnerClientAppointmentRow }) {
   const status = statusColors[appointment.status];
+  const durationMinutes = appointment.duration_minutes ?? appointment.services?.duration_minutes ?? 0;
 
   return (
     <View style={styles.historyRow}>
@@ -441,7 +442,7 @@ function AppointmentHistoryRow({ appointment }: { appointment: OwnerClientAppoin
           {appointment.services?.name ?? 'Servicio no disponible'}
         </Text>
         <Text style={styles.historyDate}>
-          {formatDateTime(appointment.requested_start_at)} - {appointment.services?.duration_minutes ?? 0} min
+          {formatDateTime(appointment.requested_start_at)} - {durationMinutes} min
         </Text>
       </View>
       <View style={[styles.statusChip, { backgroundColor: status.bg }]}>
