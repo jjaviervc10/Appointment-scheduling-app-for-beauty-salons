@@ -1,12 +1,12 @@
 ﻿import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, useWindowDimensions, Text, Alert, ScrollView, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, Text, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
 import { KPIStats, type KPIKey } from '../../src/components/dashboard/KPIStats';
 import { QuickActionsBar } from '../../src/components/dashboard/QuickActionsBar';
 import { PendingRequestsPanel } from '../../src/components/dashboard/PendingRequestsPanel';
-import { TodayTimeline } from '../../src/components/dashboard/TodayTimeline';
+import { TodayTimeline, type TimelineFilterKey } from '../../src/components/dashboard/TodayTimeline';
 import { FloatingActionButton } from '../../src/components/ui/FloatingActionButton';
 import { NewAppointmentModal } from '../../src/components/modals/NewAppointmentModal';
 import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
@@ -20,7 +20,7 @@ import { fetchTimeBlocks } from '../../src/services/availability';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
 
-type DashboardAction = 'approve' | 'reject' | 'complete';
+type DashboardAction = 'approve' | 'reject' | 'cancel' | 'complete';
 type FeedbackTone = 'success' | 'error' | 'info';
 
 interface FeedbackMessage {
@@ -59,6 +59,8 @@ function logDashboardActionError(action: string, error: unknown, meta?: Record<s
 export default function DashboardScreen() {
   const router = useRouter();
   const todayStr = formatLocalDateKey(new Date());
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const selectedDateStr = formatLocalDateKey(selectedDate);
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -78,8 +80,7 @@ export default function DashboardScreen() {
   const [workingIds, setWorkingIds] = useState<Map<string, DashboardAction>>(new Map());
   // Debounced refetch ref — cancels and reschedules on every new action to avoid race conditions
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Two-pane expand state: null = both default, 'pending' = pending expanded, 'timeline' = timeline expanded
-  const [expandedPanel, setExpandedPanel] = useState<'pending' | 'timeline' | null>(null);
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilterKey>('all');
 
   const loadDashboardData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -101,8 +102,8 @@ export default function DashboardScreen() {
     try {
       const [pendingData, todayData, blocksData, awaitingData] = await Promise.all([
         fetchPendingAppointments(),
-        fetchAppointmentsByDate(todayStr),
-        fetchTimeBlocks(todayStr),
+        fetchAppointmentsByDate(selectedDateStr),
+        fetchTimeBlocks(selectedDateStr),
         fetchAwaitingAppointments(),
       ]);
       setPending(pendingData);
@@ -117,7 +118,7 @@ export default function DashboardScreen() {
           'GET /api/owner/time-blocks',
           'GET /api/owner/appointments/awaiting',
         ],
-        todayStr,
+        dateStr: selectedDateStr,
       });
       if (!opts?.silent) {
         setErrorMsg(`No se pudo sincronizar con backend. ${getErrorMessage(error)}`);
@@ -136,7 +137,23 @@ export default function DashboardScreen() {
         setLoading(false);
       }
     }
-  }, [todayStr]);
+  }, [selectedDateStr]);
+
+  const goToPrevDay = useCallback(() => {
+    setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; });
+  }, []);
+
+  const goToNextDay = useCallback(() => {
+    setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; });
+  }, []);
+
+  const goToToday = useCallback(() => {
+    setSelectedDate(new Date());
+  }, []);
+
+  const goToDate = useCallback((date: Date) => {
+    setSelectedDate(date);
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
@@ -198,6 +215,7 @@ export default function DashboardScreen() {
       const endpointByAction = {
         approve: `POST /api/owner/appointments/${id}/approve`,
         reject: `POST /api/owner/appointments/${id}/reject`,
+        cancel: `POST /api/owner/appointments/${id}/cancel`,
         complete: `POST /api/owner/appointments/${id}/complete`,
       } as const;
 
@@ -232,6 +250,13 @@ export default function DashboardScreen() {
           // Optimistic update: remove from pending immediately
           setPending(prev => prev.filter(a => a.id !== id));
         }
+        if (action === 'cancel') {
+          await updateAppointmentStatus(id, 'owner_cancelled', 'Cancelación manual desde dashboard');
+          // Optimistic update: remove from all lists
+          setPending(prev => prev.filter(a => a.id !== id));
+          setAwaiting(prev => prev.filter(a => a.id !== id));
+          setTodayAppts(prev => prev.filter(a => a.id !== id));
+        }
         if (action === 'complete') {
           await updateAppointmentStatus(id, 'completed');
           // Optimistic update: update status in todayAppts immediately
@@ -250,8 +275,13 @@ export default function DashboardScreen() {
           },
           reject: {
             tone: 'success',
-            title: 'Cita cancelada',
+            title: 'Solicitud rechazada',
             message: 'La solicitud fue rechazada y salio de pendientes.',
+          },
+          cancel: {
+            tone: 'success',
+            title: 'Cita cancelada',
+            message: 'La cita fue cancelada y retirada del timeline.',
           },
           complete: {
             tone: 'success',
@@ -277,63 +307,71 @@ export default function DashboardScreen() {
         setWorkingIds(prev => { const m = new Map(prev); m.delete(id); return m; });
       }
     },
-    [loadDashboardData, pending, todayStr, scheduleSilentRefetch]
+    [loadDashboardData, pending, awaiting, todayStr, scheduleSilentRefetch]
   );
 
   const confirmReject = useCallback(
     (id: string) => {
-      const appt = pending.find((item) => item.id === id);
+      const appt = [...pending, ...todayAppts].find((item) => item.id === id);
       const clientName = appt?.clientName ?? 'esta cita';
 
       Alert.alert(
-        'Cancelar solicitud',
-        `¿Seguro que deseas cancelar la solicitud de ${clientName}? Esta accion notificara el cambio de estado en backend.`,
+        'Rechazar solicitud',
+        `¿Rechazar la solicitud de ${clientName}? Esta accion notificara el cambio de estado en backend.`,
         [
           { text: 'Volver', style: 'cancel' },
           {
-            text: 'Cancelar cita',
+            text: 'Rechazar',
             style: 'destructive',
             onPress: () => void runAction(id, 'reject'),
           },
         ],
       );
     },
-    [pending, runAction]
+    [pending, todayAppts, runAction]
   );
 
-  const handleTimelinePress = useCallback(
+  const confirmCancel = useCallback(
+    (id: string) => {
+      const appt = [...todayAppts, ...awaiting].find((item) => item.id === id);
+      const clientName = appt?.clientName ?? 'esta cita';
+
+      Alert.alert(
+        'Cancelar cita',
+        `¿Cancelar la cita de ${clientName}? El cliente sera notificado del cambio.`,
+        [
+          { text: 'Volver', style: 'cancel' },
+          {
+            text: 'Cancelar cita',
+            style: 'destructive',
+            onPress: () => void runAction(id, 'cancel'),
+          },
+        ],
+      );
+    },
+    [todayAppts, awaiting, runAction]
+  );
+
+  const confirmComplete = useCallback(
     (id: string) => {
       const appt = todayAppts.find((item) => item.id === id);
-      if (!appt) return;
+      const clientName = appt?.clientName ?? 'esta cita';
 
-      // Allow approving directly from timeline when the appointment is still pending
-      if (appt.status === 'pending_owner_approval') {
-        Alert.alert(
-          'Aprobar cita',
-          `¿Aprobar la cita de ${appt.clientName} a las ${appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}?`,
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Aprobar', onPress: () => void runAction(id, 'approve') },
-          ],
-        );
-        return;
-      }
-
-      if (appt.status !== 'confirmed_by_owner') {
-        Alert.alert(
-          'Sin acción disponible',
-          `Estado actual: "${appt.status}". Solo citas confirmadas pueden marcarse como completadas.`,
-        );
-        return;
-      }
-
-      Alert.alert('Completar cita', '¿Marcar esta cita como completada?', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Completar', onPress: () => void runAction(id, 'complete') },
-      ]);
+      Alert.alert(
+        'Completar cita',
+        `¿Marcar la cita de ${clientName} como completada?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Completar',
+            onPress: () => void runAction(id, 'complete'),
+          },
+        ],
+      );
     },
     [todayAppts, runAction]
   );
+
 
   const handleRescheduleComplete = useCallback(
     (result: RescheduleSimulationResult) => {
@@ -348,8 +386,8 @@ export default function DashboardScreen() {
 
       // 2. Update todayAppts based on new status and dates
       if (rescheduled) {
-        const originalWasToday = formatLocalDateKey(rescheduled.startAt) === todayStr;
-        const newIsToday = result.newDate === todayStr;
+        const originalWasToday = formatLocalDateKey(rescheduled.startAt) === selectedDateStr;
+        const newIsToday = result.newDate === selectedDateStr;
 
         if (result.newStartAt && newIsToday) {
           // Scenario A — new slot is today: add/update in Timeline with new times
@@ -447,75 +485,35 @@ export default function DashboardScreen() {
         />
       </View>
 
-      {/* Awaiting panel — only shown when there are items */}
-      {awaiting.length > 0 && (
-        <View style={styles.awaitingSection}>
-          <View style={styles.awaitingHeader}>
-            <View style={styles.awaitingBadge}>
-              <Text style={styles.awaitingBadgeText}>{awaiting.length}</Text>
-            </View>
-            <Text style={styles.awaitingTitle}>En espera de confirmación</Text>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.awaitingScroll}
-          >
-            {awaiting.map((appt) => (
-              <View key={appt.id} style={styles.awaitingCard}>
-                <Text style={styles.awaitingCardName} numberOfLines={1}>{appt.clientName}</Text>
-                <Text style={styles.awaitingCardService} numberOfLines={1}>{appt.serviceName}</Text>
-                <Text style={styles.awaitingCardTime}>
-                  {appt.startAt.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' })}
-                  {' · '}
-                  {appt.startAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-                <TouchableOpacity
-                  style={styles.awaitingCardBtn}
-                  onPress={() => setRescheduleId(appt.id)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.awaitingCardBtnText}>Reprogramar</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      {/* Compact pending/awaiting summary banner */}
+      <PendingRequestsPanel
+        count={pending.length}
+        awaitingCount={awaiting.length}
+        activeFilter={timelineFilter}
+        onFilterPending={() => setTimelineFilter('pending')}
+        onClearFilter={() => setTimelineFilter('all')}
+      />
 
-      {/* Two-pane operational area: side-by-side on desktop, stacked on mobile */}
-      <View style={[styles.panesContainer, !isMobile && styles.panesContainerDesktop]}>
-        <View style={[
-          styles.pane,
-          expandedPanel === 'pending' && styles.paneExpanded,
-          expandedPanel === 'timeline' && styles.paneCollapsed,
-        ]}>
-          <PendingRequestsPanel
-            appointments={pending}
-            onAccept={(id) => void runAction(id, 'approve')}
-            onReject={confirmReject}
-            onReschedule={(id) => setRescheduleId(id)}
-            workingIds={workingIds}
-            isExpanded={expandedPanel === 'pending'}
-            isCollapsed={expandedPanel === 'timeline'}
-            onToggle={() => setExpandedPanel(prev => prev === 'pending' ? null : 'pending')}
-          />
-        </View>
-
-        <View style={[
-          styles.pane,
-          expandedPanel === 'timeline' && styles.paneExpanded,
-          expandedPanel === 'pending' && styles.paneCollapsed,
-        ]}>
-          <TodayTimeline
-            appointments={todayAppts}
-            blocks={todayBlocks}
-            onAppointmentPress={handleTimelinePress}
-            isExpanded={expandedPanel === 'timeline'}
-            isCollapsed={expandedPanel === 'pending'}
-            onToggle={() => setExpandedPanel(prev => prev === 'timeline' ? null : 'timeline')}
-          />
-        </View>
+      {/* Unified timeline — takes all remaining height */}
+      <View style={[styles.timelineContainer, isMobile && styles.timelineContainerMobile]}>
+        <TodayTimeline
+          appointments={todayAppts}
+          blocks={todayBlocks}
+          workingIds={workingIds}
+          activeFilter={timelineFilter}
+          onFilterChange={setTimelineFilter}
+          onApprove={(id) => void runAction(id, 'approve')}
+          onReject={confirmReject}
+          onCancel={confirmCancel}
+          onReschedule={(id) => setRescheduleId(id)}
+          onComplete={confirmComplete}
+          selectedDate={selectedDate}
+          todayStr={todayStr}
+          onPrevDay={goToPrevDay}
+          onNextDay={goToNextDay}
+          onGoToToday={goToToday}
+          onGoToDate={goToDate}
+        />
       </View>
 
       <FloatingActionButton
@@ -575,37 +573,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
     gap: spacing.xs,
   },
-  // Two-pane container: stacked on mobile, side-by-side on desktop
-  panesContainer: {
-    flex: 1,
-    flexDirection: 'column',
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-  },
-  panesContainerDesktop: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.xxl,
-    paddingBottom: spacing.xxl,
-    gap: spacing.lg,
-  },
-  // Each pane: default equal flex
-  // minWidth:0 + minHeight:0 required for flex children to shrink below content size
-  // in both row (desktop) and column (mobile) directions
-  pane: {
+  // Unified timeline: takes all remaining vertical space
+  timelineContainer: {
     flex: 1,
     minHeight: 0,
-    minWidth: 0,
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.xxl,
   },
-  // Expanded: take maximum available space (other pane collapses to header)
-  paneExpanded: {
-    flex: 1,
-    minWidth: 0,
-  },
-  // Collapsed: shrink to just the header height
-  paneCollapsed: {
-    flex: 0,
-    flexShrink: 0,
+  timelineContainerMobile: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
   },
   errorText: {
     color: colors.error,
@@ -665,77 +642,6 @@ const styles = StyleSheet.create({
   feedbackDismiss: {
     color: colors.gold,
     fontSize: 12,
-    fontWeight: '700',
-  },
-  // Awaiting panel
-  awaitingSection: {
-    paddingHorizontal: spacing.xxl,
-    paddingBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  awaitingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  awaitingBadge: {
-    backgroundColor: colors.statusAwaitingClient,
-    borderRadius: radii.full,
-    minWidth: 22,
-    height: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs,
-  },
-  awaitingBadgeText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  awaitingTitle: {
-    ...typography.subtitle,
-    color: colors.statusAwaitingClient,
-    fontSize: 13,
-  },
-  awaitingScroll: {
-    gap: spacing.sm,
-    paddingRight: spacing.xxl,
-  },
-  awaitingCard: {
-    backgroundColor: colors.gray900,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.statusAwaitingClient + '60',
-    padding: spacing.md,
-    minWidth: 180,
-    maxWidth: 220,
-    gap: spacing.xxs,
-  },
-  awaitingCardName: {
-    ...typography.subtitle,
-    color: colors.white,
-    fontSize: 13,
-  },
-  awaitingCardService: {
-    ...typography.caption,
-    color: colors.gray400,
-  },
-  awaitingCardTime: {
-    ...typography.caption,
-    color: colors.statusAwaitingClient,
-  },
-  awaitingCardBtn: {
-    marginTop: spacing.xs,
-    backgroundColor: colors.statusAwaitingClient + '20',
-    borderRadius: radii.sm,
-    paddingVertical: spacing.xs,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.statusAwaitingClient + '60',
-  },
-  awaitingCardBtnText: {
-    ...typography.caption,
-    color: colors.statusAwaitingClient,
     fontWeight: '700',
   },
 });
