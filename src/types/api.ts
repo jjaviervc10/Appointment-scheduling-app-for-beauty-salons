@@ -276,10 +276,9 @@ export interface PublicServicesResponse {
   }>;
 }
 
-export interface PublicAvailabilityResponse {
-  ok: true;
-  slots: PublicAvailabilitySlot[];
-}
+export type PublicAvailabilityResponse =
+  | { ok: true; slots: PublicAvailabilitySlot[]; weekAvailable: false; message: string }
+  | { ok: true; slots: PublicAvailabilitySlot[]; weekAvailable: true };
 
 export interface PublicMiniAppTokenAppointment {
   id: string;
@@ -381,6 +380,44 @@ export interface CreateIncidentResponse {
     created_at: string;
     affectedAppointmentsCount: number;
   };
+}
+
+export interface OwnerIncident {
+  id: string;
+  /** YYYY-MM-DD (local business timezone) */
+  date: string;
+  /** HH:mm */
+  block_start_time: string;
+  /** HH:mm */
+  block_end_time: string;
+  title: string;
+  description: string | null;
+  severity: 'low' | 'medium' | 'high' | 'emergency';
+  /** Always [] per contract */
+  affected_appointment_ids: string[];
+  is_resolved: boolean;
+  /** ISO 8601 UTC */
+  created_at: string;
+}
+
+export interface OwnerIncidentsResponse {
+  ok: true;
+  data: OwnerIncident[];
+}
+
+export interface OwnerTimeBlockUpdateInput {
+  blockType?: string;
+  reason?: string | null;
+  isRecurring?: boolean;
+  specificDate?: string | null;
+  dayOfWeek?: number | null;
+  startTime?: string;
+  endTime?: string;
+}
+
+export interface OwnerTimeBlockUpdateResponse {
+  ok: true;
+  timeBlock: OwnerTimeBlockRow;
 }
 
 // ─── Messages diagnostics & send-now ─────────────────────────────────────────

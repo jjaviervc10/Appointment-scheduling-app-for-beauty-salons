@@ -196,8 +196,9 @@ export function NewAppointmentModal({ visible, onClose, onCreated, initialPhone 
     setError(null);
 
     getPublicAvailability(selectedServiceId, weekStartKey)
-      .then((slots) => {
+      .then((availResponse) => {
         if (cancelled) return;
+        const slots = availResponse.slots;
         setAvailabilitySlots(slots);
         const dates = Array.from(new Set(slots.map((slot) => getIsoDateKey(slot.slotStartAt)))).sort();
         setSelectedDate((prev) => (prev && dates.includes(prev) ? prev : dates[0] ?? ''));

@@ -180,6 +180,9 @@ export default function MiniAppBookingScreen() {
   const [availabilitySlots, setAvailabilitySlots] = useState<PublicAvailabilitySlot[]>([]);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  // null = not loaded yet; true/false once backend responds
+  const [weekAvailable, setWeekAvailable] = useState<boolean | null>(null);
+  const [weekUnavailableMessage, setWeekUnavailableMessage] = useState<string | null>(null);
   const [selectedSlotStartAt, setSelectedSlotStartAt] = useState('');
   const [appointmentType, setAppointmentType] = useState<'individual' | 'familiar'>('individual');
   const [familyWho, setFamilyWho] = useState<'papa_hijos' | 'solo_hijos'>('papa_hijos');
@@ -243,11 +246,18 @@ export default function MiniAppBookingScreen() {
       setAvailabilityLoading(true);
       setAvailabilityError(null);
       setSelectedSlotStartAt('');
+      setWeekAvailable(null);
+      setWeekUnavailableMessage(null);
 
-      const slots = await getPublicAvailability(primaryServiceId, getWeekStart(selectedDate));
-      setAvailabilitySlots(slots);
+      const response = await getPublicAvailability(primaryServiceId, getWeekStart(selectedDate));
+      setAvailabilitySlots(response.slots);
+      setWeekAvailable(response.weekAvailable);
+      setWeekUnavailableMessage(
+        response.weekAvailable === false ? response.message : null,
+      );
     } catch (error) {
       setAvailabilitySlots([]);
+      setWeekAvailable(null);
       setAvailabilityError(isHttpError(error) ? mapErrorMessage(error.status) : 'Ocurrió un error. Intenta más tarde');
     } finally {
       setAvailabilityLoading(false);
@@ -325,6 +335,8 @@ export default function MiniAppBookingScreen() {
     // Reset slot because primary service may have changed
     setSelectedSlotStartAt('');
     setAvailabilitySlots([]);
+    setWeekAvailable(null);
+    setWeekUnavailableMessage(null);
   };
 
   /** Advance to the next person's services, or proceed to schedule if all done */
@@ -339,6 +351,8 @@ export default function MiniAppBookingScreen() {
     } else {
       setSelectedSlotStartAt('');
       setAvailabilitySlots([]);
+      setWeekAvailable(null);
+      setWeekUnavailableMessage(null);
       setStep('schedule');
     }
   };
@@ -672,9 +686,19 @@ export default function MiniAppBookingScreen() {
                 <LoadingInline label="Buscando horarios" />
               ) : availabilityError ? (
                 <RetryBlock message={availabilityError} onPress={() => void loadAvailability()} />
-              ) : visibleSlots.length === 0 ? (
-                <EmptyMessage text="No hay horarios disponibles este día." />
-              ) : (
+              ) : weekAvailable === false ? (
+                <View style={styles.weekUnavailableBox}>
+                  <Ionicons name="calendar-outline" size={24} color={colors.gray400} style={styles.weekUnavailableIcon} />
+                  <Text style={styles.weekUnavailableText}>
+                    {weekUnavailableMessage ?? 'Esta semana aún no está disponible para reservas.'}
+                  </Text>
+                  <Text style={styles.weekUnavailableHint}>
+                    Prueba otra semana o contáctanos directamente.
+                  </Text>
+                </View>
+              ) : weekAvailable === true && visibleSlots.length === 0 ? (
+                <EmptyMessage text="Esta semana está disponible, pero no quedan horarios libres." />
+              ) : weekAvailable === true ? (
                 <View style={styles.slotsGrid}>
                   {visibleSlots.map((slot) => {
                     const active = slot.slotStartAt === selectedSlotStartAt;
@@ -692,7 +716,7 @@ export default function MiniAppBookingScreen() {
                     );
                   })}
                 </View>
-              )}
+              ) : null}
 
               <PrimaryAction
                 label="Continuar"
@@ -1203,6 +1227,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  weekUnavailableBox: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+  weekUnavailableIcon: {
+    marginBottom: spacing.xs,
+  },
+  weekUnavailableText: {
+    ...typography.body,
+    color: colors.gray700,
+    textAlign: 'center',
+  },
+  weekUnavailableHint: {
+    ...typography.bodySmall,
+    color: colors.gray500,
+    textAlign: 'center',
   },
   slotButton: {
     width: '47%',

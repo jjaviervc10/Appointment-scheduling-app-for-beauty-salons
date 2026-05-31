@@ -47,6 +47,11 @@ La mini app:
 - Usa una experiencia guiada de 4 pasos: datos, servicio, dia/horario, confirmar.
 - Carga servicios reales con `GET /api/public/services`.
 - Carga disponibilidad real con `GET /api/public/availability?serviceId=<uuid>&weekStart=YYYY-MM-DD`.
+  - El backend decide si una semana está publicada. La respuesta es una unión discriminada:
+    - `weekAvailable: false` + `message: string` → semana no configurada por el dueño → mostrar `message` y deshabilitar el selector de slots (no asumir que `message` siempre viene cuando `weekAvailable: true`).
+    - `weekAvailable: true` + `slots: []` → semana publicada pero sin horarios libres → mostrar "Esta semana está disponible, pero no quedan horarios libres."
+    - `weekAvailable: true` + `slots: [...]` → mostrar slots normalmente.
+  - El campo `message` **solo existe** en la rama `weekAvailable === false`; no asumir que siempre viene.
 - Muestra los proximos 7 dias sin calendario complejo.
 - Filtra los slots del dia elegido usando `slotStartAt` del backend.
 - Permite completar nombre, celular, servicio, dia/horario usando datos reales.

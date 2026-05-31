@@ -1,5 +1,5 @@
 ﻿import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, useWindowDimensions, Text, Alert } from 'react-native';
+import { View, StyleSheet, useWindowDimensions, Text, Alert, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, radii, spacing, typography } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
@@ -21,6 +21,7 @@ import { approveOwnerAppointment } from '../../src/services/ownerApi';
 import { fetchTimeBlocks } from '../../src/services/availability';
 import { isHttpError } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
+import { MOCK_DEMO_APPOINTMENTS, MOCK_DEMO_PENDING, MOCK_DEMO_AWAITING, MOCK_DEMO_BLOCKS } from '../../src/services/mock-data';
 
 type DashboardAction = 'approve' | 'reject' | 'cancel' | 'complete';
 type FeedbackTone = 'success' | 'error' | 'info';
@@ -84,6 +85,7 @@ export default function DashboardScreen() {
   // Debounced refetch ref — cancels and reschedules on every new action to avoid race conditions
   const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilterKey>('all');
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const loadDashboardData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -142,6 +144,21 @@ export default function DashboardScreen() {
     }
   }, [selectedDateStr]);
 
+  const activateDemoMode = useCallback(() => {
+    setIsDemoMode(true);
+    setTodayAppts(MOCK_DEMO_APPOINTMENTS);
+    setPending(MOCK_DEMO_PENDING);
+    setAwaiting(MOCK_DEMO_AWAITING);
+    setTodayBlocks(MOCK_DEMO_BLOCKS);
+    setLoading(false);
+    setErrorMsg(null);
+    setFeedback({ tone: 'info', title: 'Modo Demo activo', message: '8 citas simuladas cargadas para hoy.' });
+  }, []);
+
+  const deactivateDemoMode = useCallback(() => {
+    setIsDemoMode(false);
+    void loadDashboardData();
+  }, [loadDashboardData]);
 
   const goToPrevDay = useCallback(() => {
     setSelectedDate(d => { const n = new Date(d); n.setDate(n.getDate() - 1); return n; });
@@ -510,6 +527,16 @@ export default function DashboardScreen() {
         {loading ? <Text style={styles.loadingText}>Sincronizando con backend...</Text> : null}
         {workingIds.size > 0 ? <Text style={styles.loadingText}>Aplicando {workingIds.size} cambio{workingIds.size > 1 ? 's' : ''}...</Text> : null}
 
+        {/* Demo mode toggle */}
+        <TouchableOpacity
+          style={[styles.demoBtn, isDemoMode && styles.demoBtnActive]}
+          onPress={isDemoMode ? deactivateDemoMode : activateDemoMode}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.demoBtnText, isDemoMode && styles.demoBtnTextActive]}>
+            {isDemoMode ? '✕ Salir del modo demo' : '▶ Cargar datos demo'}
+          </Text>
+        </TouchableOpacity>
 
         <KPIStats
           citasHoy={todayAppts.length}
@@ -645,6 +672,28 @@ const styles = StyleSheet.create({
   loadingText: {
     color: colors.gray400,
     fontSize: 12,
+  },
+  demoBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.gray700,
+    backgroundColor: 'transparent',
+  },
+  demoBtnActive: {
+    borderColor: colors.gold,
+    backgroundColor: colors.gold + '18',
+  },
+  demoBtnText: {
+    ...typography.caption,
+    color: colors.gray500,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  demoBtnTextActive: {
+    color: colors.gold,
   },
   feedback: {
     flexDirection: 'row',

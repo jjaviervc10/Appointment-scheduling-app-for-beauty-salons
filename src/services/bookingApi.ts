@@ -1,7 +1,6 @@
 import { apiRequest } from './apiClient';
 import type {
   PublicAvailabilityResponse,
-  PublicAvailabilitySlot,
   PublicBookingRequestInput,
   PublicBookingResponse,
   PublicCancelAppointmentInput,
@@ -38,12 +37,9 @@ export async function getPublicServices(): Promise<PublicService[]> {
 export async function getPublicAvailability(
   serviceId: string,
   weekStart: string
-): Promise<PublicAvailabilitySlot[]> {
+): Promise<PublicAvailabilityResponse> {
   const query = `serviceId=${encodeURIComponent(serviceId)}&weekStart=${encodeURIComponent(weekStart)}`;
-  const response = await apiRequest<PublicAvailabilityResponse>(
-    `/api/public/availability?${query}`
-  );
-  return response.slots;
+  return apiRequest<PublicAvailabilityResponse>(`/api/public/availability?${query}`);
 }
 
 export async function getPublicMiniAppToken(

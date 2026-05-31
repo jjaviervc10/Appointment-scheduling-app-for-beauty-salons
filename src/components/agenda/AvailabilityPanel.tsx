@@ -1,27 +1,65 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ActivityIndicator, View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, useWindowDimensions } from 'react-native';
+﻿import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  useWindowDimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 import type { WeeklyAvailability } from '../../types/database';
 import type { DayOfWeek } from '../../types/enums';
-import { fetchWeeklyAvailability, updateWeeklyAvailability, deleteWeekOverride } from '../../services/availability';
+import {
+  fetchWeeklyAvailability,
+  updateWeeklyAvailability,
+} from '../../services/availability';
 import { isHttpError } from '../../types/api';
+import { AvailabilitySummary } from '../availability/AvailabilitySummary';
+import { DayAvailabilityRow } from '../availability/DayAvailabilityRow';
+import {
+  DayAvailabilityEditor,
+  type DayPatch,
+} from '../availability/DayAvailabilityEditor';
 
-const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+// --- Constants ----------------------------------------------------------------
+
+const DAYS_ES = [
+  'Domingo',
+  'Lunes',
+  'Martes',
+  'Miercoles',
+  'Jueves',
+  'Viernes',
+  'Sabado',
+] as const;
+
+const DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'] as const;
+
+/** Display order: Mon -> Sat -> Sun */
 const DISPLAY_DAYS: DayOfWeek[] = [1, 2, 3, 4, 5, 6, 0];
-const ALLOWED_MINUTES = new Set(['00', '15', '30', '45']);
 
-type Period = 'AM' | 'PM';
-type FieldName = 'start_time' | 'end_time';
+// --- Pure helpers -------------------------------------------------------------
 
-function defaultDay(dayOfWeek: DayOfWeek): WeeklyAvailability {
+function normalizeClockTime(t: string): string {
+  const [h = '00', m = '00'] = t.split(':');
+  return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+}
+
+function defaultDay(dow: DayOfWeek): WeeklyAvailability {
   return {
     id: '',
     owner_id: '',
-    day_of_week: dayOfWeek,
-    start_time: dayOfWeek === 6 ? '10:00' : '10:00',
-    end_time: dayOfWeek === 6 ? '17:00' : '20:00',
+    day_of_week: dow,
+    start_time: '09:00',
+    end_time: '20:00',
     is_active: false,
     is_override: false,
     override_id: null,
@@ -29,14 +67,9 @@ function defaultDay(dayOfWeek: DayOfWeek): WeeklyAvailability {
   };
 }
 
-function normalizeClockTime(value: string): string {
-  const [hour = '00', minute = '00'] = value.split(':');
-  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
-}
-
 function normalizeAvailability(rows: WeeklyAvailability[]): WeeklyAvailability[] {
   return DISPLAY_DAYS.map((dow) => {
-    const found = rows.find((row) => row.day_of_week === dow);
+    const found = rows.find((r) => r.day_of_week === dow);
     if (!found) return defaultDay(dow);
     return {
       ...defaultDay(dow),
@@ -47,87 +80,35 @@ function normalizeAvailability(rows: WeeklyAvailability[]): WeeklyAvailability[]
   });
 }
 
-function to12h(time24: string): { hour: string; minute: string; period: Period } {
-  const [hStr, mStr] = normalizeClockTime(time24).split(':');
-  let h = parseInt(hStr, 10);
-  const period: Period = h >= 12 ? 'PM' : 'AM';
-  if (h === 0) h = 12;
-  else if (h > 12) h -= 12;
-  return { hour: String(h), minute: mStr || '00', period };
+/** Converts "HH:mm" to "HH:mm:00" as expected by the backend validator. */
+function toApiTime(t: string): string {
+  return `${normalizeClockTime(t)}:00`;
 }
 
-function to24h(hour: string, minute: string, period: Period): string {
-  let h = parseInt(hour, 10);
-  let m = parseInt(minute, 10);
-  if (isNaN(h) || h < 1 || h > 12) h = 12;
-  if (isNaN(m) || m < 0) m = 0;
-  if (m > 59) m = 59;
-  if (period === 'AM' && h === 12) h = 0;
-  else if (period === 'PM' && h !== 12) h += 12;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+function getMonday(d: Date): Date {
+  const date = new Date(d);
+  const day = date.getDay();
+  date.setDate(date.getDate() - day + (day === 0 ? -6 : 1));
+  date.setHours(0, 0, 0, 0);
+  return date;
 }
 
-function toApiTime(time: string): string {
-  return `${normalizeClockTime(time)}:00`;
-}
+type DayInfo = {
+  date: string;
+  monthShort: string;
+  monthLong: string;
+  fullLabel: string;
+};
 
-function minutesOfDay(time: string): number {
-  const [hour = '0', minute = '0'] = normalizeClockTime(time).split(':');
-  return Number(hour) * 60 + Number(minute);
-}
-
-function format12Display(time24: string): string {
-  const { hour, minute, period } = to12h(time24);
-  return `${hour}:${minute} ${period}`;
-}
-
-function validationMessage(rows: WeeklyAvailability[]): string | null {
-  for (const row of rows) {
-    const start = normalizeClockTime(row.start_time);
-    const end = normalizeClockTime(row.end_time);
-    const [, startMinute = '00'] = start.split(':');
-    const [, endMinute = '00'] = end.split(':');
-
-    if (!ALLOWED_MINUTES.has(startMinute) || !ALLOWED_MINUTES.has(endMinute)) {
-      return `${DAYS_ES[row.day_of_week]} debe usar minutos 00, 15, 30 o 45.`;
-    }
-
-    if (row.is_active && minutesOfDay(start) >= minutesOfDay(end)) {
-      return `${DAYS_ES[row.day_of_week]} debe tener hora de cierre mayor que la de apertura.`;
-    }
-  }
-
-  return null;
-}
-
-function serializeRows(rows: WeeklyAvailability[]): string {
-  return JSON.stringify(rows.map((row) => ({
-    dayOfWeek: row.day_of_week,
-    startTime: normalizeClockTime(row.start_time),
-    endTime: normalizeClockTime(row.end_time),
-    isActive: row.is_active,
-  })));
-}
-
-function getMonday(base: Date): Date {
-  const d = new Date(base);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function computeWeekWindow(weekOffset: number): {
-  weekLabel: string;
-  weekLabelShort: string;
+type WeekContext = {
   isCurrentWeek: boolean;
   todayDow: DayOfWeek;
-  monday: Date;
-  sunday: Date;
-  dayDates: Record<DayOfWeek, string>;
-  dayMonths: Record<DayOfWeek, string>;
-} {
+  labelShort: string;
+  isoMonday: string;
+  dayInfos: Record<DayOfWeek, DayInfo>;
+};
+
+function getWeekContext(weekOffset: number): WeekContext {
   const today = new Date();
   const todayDow = today.getDay() as DayOfWeek;
   const monday = getMonday(today);
@@ -135,560 +116,375 @@ function computeWeekWindow(weekOffset: number): {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
-  const fmt = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
-  const fmtShort = (d: Date) => d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+  const fmtShort = (d: Date) =>
+    d.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
   const year = sunday.getFullYear();
+  const labelShort = `${fmtShort(monday)} - ${fmtShort(sunday)}, ${year}`;
 
-  const weekLabel = `Semana del ${fmt(monday)} al ${fmt(sunday)}, ${year}`;
-  const weekLabelShort = `${fmtShort(monday)} — ${fmtShort(sunday)}, ${year}`;
+  const isoMonday = [
+    monday.getFullYear(),
+    String(monday.getMonth() + 1).padStart(2, '0'),
+    String(monday.getDate()).padStart(2, '0'),
+  ].join('-');
 
-  const dayDates: Partial<Record<DayOfWeek, string>> = {};
-  const dayMonths: Partial<Record<DayOfWeek, string>> = {};
+  const dayInfosPartial: Partial<Record<DayOfWeek, DayInfo>> = {};
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
     const dow = d.getDay() as DayOfWeek;
-    dayDates[dow] = String(d.getDate());
-    dayMonths[dow] = d.toLocaleDateString('es-MX', { month: 'short' });
+    dayInfosPartial[dow] = {
+      date: String(d.getDate()),
+      monthShort: d.toLocaleDateString('es-MX', { month: 'short' }),
+      monthLong: d.toLocaleDateString('es-MX', { month: 'long' }),
+      fullLabel: d.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' }),
+    };
   }
 
   return {
-    weekLabel,
-    weekLabelShort,
     isCurrentWeek: weekOffset === 0,
     todayDow,
-    monday,
-    sunday,
-    dayDates: dayDates as Record<DayOfWeek, string>,
-    dayMonths: dayMonths as Record<DayOfWeek, string>,
+    labelShort,
+    isoMonday,
+    dayInfos: dayInfosPartial as Record<DayOfWeek, DayInfo>,
   };
 }
+
+// --- Component ----------------------------------------------------------------
 
 interface AvailabilityPanelProps {
   onGoToBlocks?: () => void;
 }
 
-export function AvailabilityPanel({ onGoToBlocks }: AvailabilityPanelProps = {}) {
+export function AvailabilityPanel({
+  onGoToBlocks: _onGoToBlocks,
+}: AvailabilityPanelProps = {}) {
   const [availability, setAvailability] = useState<WeeklyAvailability[]>([]);
-  const [lastSavedSnapshot, setLastSavedSnapshot] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingDay, setEditingDay] = useState<DayOfWeek | null>(null);
-  const [hasOverrides, setHasOverrides] = useState(false);
-  const { width } = useWindowDimensions();
-  const isMobile = width < 600;
-
   const [weekOffset, setWeekOffset] = useState(0);
 
-  const isDirty = useMemo(
-    () => serializeRows(availability) !== lastSavedSnapshot,
-    [availability, lastSavedSnapshot]
-  );
+  const { width, height: windowHeight } = useWindowDimensions();
+  const isDesktop = width >= 768;
+  const editorMobileHeight = Math.round(windowHeight * 0.65);
 
-  const weekContext = useMemo(() => computeWeekWindow(weekOffset), [weekOffset]);
+  const weekCtx = useMemo(() => getWeekContext(weekOffset), [weekOffset]);
 
-  // ISO date of the Monday of the navigated week — sent to the API as week_start_date
-  const weekStartDate = useMemo(() => {
-    const d = weekContext.monday;
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }, [weekContext]);
+  // --- Data loading -----------------------------------------------------------
 
   const loadAvailability = useCallback(async (wsd?: string) => {
     setLoading(true);
     setError(null);
-    setNotice(null);
-
     try {
       const result = await fetchWeeklyAvailability(wsd);
-      const data = normalizeAvailability(result.data);
-      setAvailability(data);
-      setLastSavedSnapshot(serializeRows(data));
-      setHasOverrides(result.hasOverrides);
-    } catch (loadError) {
-      if (isHttpError(loadError) && loadError.status === 401) {
-        setError('No autorizado. Verifica el token owner configurado para Netlify.');
-      } else if (loadError instanceof Error) {
-        setError(loadError.message);
-      } else {
-        setError('No se pudo cargar la disponibilidad.');
-      }
+      setAvailability(normalizeAvailability(result.data));
+    } catch (e) {
+      const msg =
+        isHttpError(e) && e.status === 401
+          ? 'No autorizado. Verifica el token owner configurado en Netlify.'
+          : e instanceof Error
+          ? e.message
+          : 'No se pudo cargar la disponibilidad.';
+      setError(msg);
       setAvailability([]);
-      setLastSavedSnapshot('');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Re-load when week changes
   useEffect(() => {
-    void loadAvailability(weekContext.isCurrentWeek ? undefined : weekStartDate);
+    void loadAvailability(
+      weekCtx.isCurrentWeek ? undefined : weekCtx.isoMonday,
+    );
     setEditingDay(null);
-  }, [weekStartDate, weekContext.isCurrentWeek, loadAvailability]);
-
-  const updateDay = useCallback((dayOfWeek: DayOfWeek, patch: Partial<WeeklyAvailability>) => {
+    setSaveError(null);
     setNotice(null);
-    setAvailability((prev) =>
-      normalizeAvailability(prev).map((row) =>
-        row.day_of_week === dayOfWeek ? { ...row, ...patch } : row
-      )
-    );
-  }, []);
+  }, [weekCtx.isoMonday, weekCtx.isCurrentWeek, loadAvailability]);
 
-  const toggleDay = useCallback((dayOfWeek: DayOfWeek) => {
-    const existing = availability.find(a => a.day_of_week === dayOfWeek) ?? defaultDay(dayOfWeek);
-    updateDay(dayOfWeek, { is_active: !existing.is_active });
-  }, [availability, updateDay]);
+  // --- Save handler -----------------------------------------------------------
 
-  const updateTimePart = useCallback((
-    dayOfWeek: DayOfWeek,
-    field: FieldName,
-    part: 'hour' | 'minute' | 'period',
-    value: string,
-    currentTime: string,
-  ) => {
-    const parsed = to12h(currentTime);
-    if (part === 'hour') parsed.hour = value.replace(/[^0-9]/g, '').slice(0, 2);
-    else if (part === 'minute') parsed.minute = value.replace(/[^0-9]/g, '').slice(0, 2);
-    else parsed.period = value as Period;
-    updateDay(dayOfWeek, { [field]: to24h(parsed.hour, parsed.minute, parsed.period) });
-  }, [updateDay]);
+  const handleSave = useCallback(
+    async (dayOfWeek: DayOfWeek, patch: DayPatch, applyToAll = false) => {
+      setSaving(true);
+      setSaveError(null);
+      setNotice(null);
 
-  const copyToAll = useCallback((sourceDow: DayOfWeek) => {
-    const source = availability.find(a => a.day_of_week === sourceDow);
-    if (!source) return;
-    const dayName = DAYS_ES[sourceDow];
-    const action = source.is_active
-      ? `Copiar ${format12Display(source.start_time)}–${format12Display(source.end_time)} de ${dayName} a todos los días`
-      : `Marcar todos los días como Cerrado (igual que ${dayName})`;
-    // En web usamos confirm(); en nativo se podría usar Alert.alert
-    // eslint-disable-next-line no-alert
-    if (typeof window !== 'undefined' && window.confirm) {
-      if (!window.confirm(`¿${action}?\n\nEsta acción sobreescribirá el horario de los 7 días.`)) return;
-    }
-    setNotice(null);
-    setAvailability((prev) =>
-      normalizeAvailability(prev).map((row) => ({
-        ...row,
-        start_time: source.start_time,
-        end_time: source.end_time,
-        is_active: source.is_active,
-      }))
-    );
-  }, [availability]);
-
-  const handleSave = useCallback(async () => {
-    const normalized = normalizeAvailability(availability);
-    const message = validationMessage(normalized);
-    if (message) {
-      setNotice(message);
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-
-    // When navigating a non-current week, save as week-specific override
-    const targetWeek = weekContext.isCurrentWeek ? undefined : weekStartDate;
-
-    try {
-      const result = await updateWeeklyAvailability(
-        normalized.map((row) => ({
+      const payload = availability.map((row) => {
+        const usesPatch = applyToAll || row.day_of_week === dayOfWeek;
+        return {
           dayOfWeek: row.day_of_week,
-          startTime: toApiTime(row.start_time),
-          endTime: toApiTime(row.end_time),
-          isActive: row.is_active,
-        })),
-        targetWeek
-      );
-      const saved = normalizeAvailability(result.data);
-      setAvailability(saved);
-      setLastSavedSnapshot(serializeRows(saved));
-      setHasOverrides(result.hasOverrides);
-      setNotice(targetWeek
-        ? `Horario de la semana del ${weekContext.weekLabelShort} guardado correctamente.`
-        : 'Disponibilidad guardada correctamente.'
-      );
-    } catch (saveError) {
-      if (isHttpError(saveError) && saveError.status === 400) {
-        setNotice(saveError.message);
-      } else if (isHttpError(saveError) && saveError.status === 401) {
-        setNotice('No autorizado. Verifica el token owner configurado para Netlify.');
-      } else if (saveError instanceof Error) {
-        setNotice(saveError.message);
-      } else {
-        setNotice('No se pudo guardar la disponibilidad.');
+          startTime: toApiTime(usesPatch ? patch.startTime : row.start_time),
+          endTime: toApiTime(usesPatch ? patch.endTime : row.end_time),
+          isActive: usesPatch ? patch.isActive : row.is_active,
+        };
+      });
+
+      try {
+        const result = await updateWeeklyAvailability(
+          payload,
+          weekCtx.isCurrentWeek ? undefined : weekCtx.isoMonday,
+        );
+        setAvailability(normalizeAvailability(result.data));
+        setNotice(
+          applyToAll
+            ? 'Horario aplicado a toda la semana correctamente.'
+            : 'Disponibilidad guardada correctamente.',
+        );
+        setEditingDay(null);
+      } catch (saveErr) {
+        const msg =
+          isHttpError(saveErr) && saveErr.status === 400
+            ? saveErr.message
+            : isHttpError(saveErr) && saveErr.status === 401
+            ? 'No autorizado. Verifica el token owner.'
+            : saveErr instanceof Error
+            ? saveErr.message
+            : 'No se pudo guardar la disponibilidad.';
+        setSaveError(msg);
+      } finally {
+        setSaving(false);
       }
-    } finally {
-      setSaving(false);
-    }
-  }, [availability, weekContext, weekStartDate]);
+    },
+    [availability, weekCtx],
+  );
 
-  const handleResetOverrides = useCallback(async () => {
-    if (!hasOverrides) return;
-    // eslint-disable-next-line no-alert
-    if (typeof window !== 'undefined' && window.confirm) {
-      if (!window.confirm(
-        `¿Eliminar el horario personalizado de la semana del ${weekContext.weekLabelShort}?\n\nSe volverá a aplicar el horario base.`
-      )) return;
-    }
-    setResetting(true);
-    setNotice(null);
-    try {
-      await deleteWeekOverride(weekStartDate);
-      await loadAvailability(weekStartDate);
-      setNotice('Horario personalizado eliminado. Se aplica el horario base.');
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : 'No se pudo eliminar el horario personalizado.');
-    } finally {
-      setResetting(false);
-    }
-  }, [hasOverrides, weekStartDate, weekContext.weekLabelShort, loadAvailability]);
+  // --- Derived state ----------------------------------------------------------
 
-  const renderTimeInput = (dow: DayOfWeek, field: FieldName, time24: string, label: string, disabled = false) => {
-    const { hour, minute, period } = to12h(time24);
-    return (
-      <View style={styles.timeField}>
-        <Text style={styles.timeLabel}>{label}</Text>
-        <View style={styles.timeInputRow}>
-          <View style={styles.inputGroup}>
-            <TextInput
-              style={[styles.timeInput, disabled && styles.timeInputDisabled]}
-              value={hour}
-              onChangeText={(val) => !disabled && updateTimePart(dow, field, 'hour', val, time24)}
-              keyboardType="number-pad"
-              maxLength={2}
-              selectTextOnFocus
-              editable={!disabled}
-              placeholder="12"
-              placeholderTextColor={colors.gray300}
-            />
-          </View>
+  const currentDay = useMemo(
+    () =>
+      editingDay !== null
+        ? availability.find((a) => a.day_of_week === editingDay) ??
+          defaultDay(editingDay)
+        : null,
+    [editingDay, availability],
+  );
 
-          <Text style={styles.timeSeparator}>:</Text>
-
-          <View style={styles.inputGroup}>
-            <TextInput
-              style={[styles.timeInput, disabled && styles.timeInputDisabled]}
-              value={minute}
-              onChangeText={(val) => !disabled && updateTimePart(dow, field, 'minute', val, time24)}
-              keyboardType="number-pad"
-              maxLength={2}
-              selectTextOnFocus
-              editable={!disabled}
-              placeholder="00"
-              placeholderTextColor={colors.gray300}
-            />
-          </View>
-
-          <View style={[styles.periodToggle, disabled && styles.periodToggleDisabled]}>
-            <TouchableOpacity
-              style={[styles.periodBtn, period === 'AM' && styles.periodBtnActive]}
-              onPress={() => !disabled && updateTimePart(dow, field, 'period', 'AM', time24)}
-              activeOpacity={disabled ? 1 : 0.7}
-            >
-              <Text style={[styles.periodText, period === 'AM' && styles.periodTextActive]}>AM</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.periodBtn, period === 'PM' && styles.periodBtnActive]}
-              onPress={() => !disabled && updateTimePart(dow, field, 'period', 'PM', time24)}
-              activeOpacity={disabled ? 1 : 0.7}
-            >
-              <Text style={[styles.periodText, period === 'PM' && styles.periodTextActive]}>PM</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
+  // --- Render: loading --------------------------------------------------------
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.centered}>
         <ActivityIndicator size="small" color={colors.gold} />
         <Text style={styles.loadingText}>Cargando disponibilidad...</Text>
       </View>
     );
   }
 
+  // --- Render: load error -----------------------------------------------------
+
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <View style={styles.errorIcon}>
-          <Ionicons name="alert-circle-outline" size={24} color={colors.error} />
+      <View style={styles.centered}>
+        <View style={styles.errorIconWrap}>
+          <Ionicons name="alert-circle-outline" size={28} color={colors.error} />
         </View>
         <Text style={styles.errorTitle}>No se pudo cargar la disponibilidad</Text>
-        <Text style={styles.errorMessage}>{error}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={() => void loadAvailability()} activeOpacity={0.7}>
+        <Text style={styles.errorMsg}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryBtn}
+          onPress={() => void loadAvailability()}
+          activeOpacity={0.75}
+        >
           <Ionicons name="refresh" size={16} color={colors.black} />
-          <Text style={styles.retryBtnText}>Reintentar</Text>
+          <Text style={styles.retryText}>Reintentar</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.headerTitleBlock}>
-            <Text style={styles.title}>Horarios disponibles</Text>
-            <Text style={styles.subtitle}>Configura los días y horas en que recibes citas</Text>
-          </View>
-        </View>
+  // --- Render: main -----------------------------------------------------------
 
+  return (
+    <View style={[styles.root, isDesktop && styles.rootDesktop]}>
+      {/* List panel */}
+      <ScrollView
+        style={styles.listPanel}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Week navigator */}
         <View style={styles.weekNav}>
           <TouchableOpacity
-            style={styles.weekNavArrow}
-            onPress={() => setWeekOffset(o => o - 1)}
+            style={styles.navArrow}
+            onPress={() => setWeekOffset((o) => o - 1)}
             activeOpacity={0.7}
           >
             <Ionicons name="chevron-back" size={18} color={colors.gray300} />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.weekNavCenter}
+            style={styles.navCenter}
             onPress={() => setWeekOffset(0)}
-            activeOpacity={weekContext.isCurrentWeek ? 1 : 0.7}
+            activeOpacity={weekCtx.isCurrentWeek ? 1 : 0.75}
           >
-            <Text style={styles.weekNavLabel} numberOfLines={1}>
-              {weekContext.weekLabelShort}
+            <Text style={styles.navLabel} numberOfLines={1}>
+              {weekCtx.labelShort}
             </Text>
-            {weekContext.isCurrentWeek ? (
-              <View style={styles.weekNavCurrentBadge}>
-                <Text style={styles.weekNavCurrentBadgeText}>Esta semana</Text>
+            {weekCtx.isCurrentWeek ? (
+              <View style={styles.todayBadge}>
+                <Text style={styles.todayBadgeText}>Esta semana</Text>
               </View>
             ) : (
-              <Text style={styles.weekNavReturnHint}>Toca para volver a esta semana</Text>
+              <Text style={styles.returnHint}>
+                Toca para volver a esta semana
+              </Text>
             )}
-            {!weekContext.isCurrentWeek && hasOverrides ? (
-              <View style={styles.weekNavOverrideBadge}>
-                <Ionicons name="pencil" size={9} color={colors.info} />
-                <Text style={styles.weekNavOverrideBadgeText}>Horario personalizado</Text>
-              </View>
-            ) : null}
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.weekNavArrow}
-            onPress={() => setWeekOffset(o => o + 1)}
+            style={styles.navArrow}
+            onPress={() => setWeekOffset((o) => o + 1)}
             activeOpacity={0.7}
           >
             <Ionicons name="chevron-forward" size={18} color={colors.gray300} />
           </TouchableOpacity>
-        </View>
-      </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, isMobile && styles.scrollContentMobile]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.statusBanner}>
-          <Ionicons name={isDirty ? 'create-outline' : 'checkmark-circle-outline'} size={18} color={isDirty ? colors.warning : colors.success} />
-          <Text style={styles.statusText}>
-            {isDirty ? 'Tienes cambios sin guardar.' : 'Disponibilidad sincronizada con backend.'}
-          </Text>
-        </View>
-
-        {notice ? (
-          <TouchableOpacity style={styles.noticeBanner} onPress={() => setNotice(null)} activeOpacity={0.8}>
-            <Text style={styles.noticeText}>{notice}</Text>
-            <Ionicons name="close" size={16} color={colors.gray400} />
-          </TouchableOpacity>
-        ) : null}
-
-        {availability.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="calendar-outline" size={28} color={colors.gray600} />
-            <Text style={styles.emptyText}>No hay disponibilidad configurada.</Text>
-          </View>
-        ) : null}
-
-        {availability.length > 0 ? (
-          <ScrollView horizontal={isMobile} showsHorizontalScrollIndicator={false}>
-            <View style={[styles.weekPreview, isMobile && styles.weekPreviewMobile]}>
-              {DISPLAY_DAYS.map((dow) => {
-                const day = availability.find(a => a.day_of_week === dow) ?? defaultDay(dow);
-                const isActive = day.is_active;
-                return (
-                  <TouchableOpacity
-                    key={dow}
-                    style={[
-                      styles.previewCol,
-                      isMobile && styles.previewColMobile,
-                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewColToday,
-                    ]}
-                    onPress={() => { setEditingDay(dow); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[
-                      styles.previewDay,
-                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewDayToday,
-                    ]}>{DAYS_SHORT[dow]}</Text>
-                    <Text style={[
-                      styles.previewDate,
-                      weekContext.isCurrentWeek && weekContext.todayDow === dow && styles.previewDateToday,
-                    ]}>{weekContext.dayDates[dow]} {weekContext.dayMonths[dow]}</Text>
-                    <View style={[styles.previewBar, !isActive && styles.previewBarInactive]}>
-                      {isActive ? (
-                        <>
-                          <Text style={styles.previewTime}>{format12Display(day.start_time)}</Text>
-                          <View style={styles.previewFill} />
-                          <Text style={styles.previewTime}>{format12Display(day.end_time)}</Text>
-                        </>
-                      ) : (
-                        <Text style={styles.previewClosed}>Cerrado</Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-        ) : null}
-
-        {availability.length > 0 ? (
-          <View style={styles.daysList}>
-            {DISPLAY_DAYS.map((dow) => {
-              const day = availability.find(a => a.day_of_week === dow) ?? defaultDay(dow);
-              const isActive = day.is_active;
-              const isExpanded = editingDay === dow;
-
-              return (
-                <View key={dow} style={[styles.dayCard, !isActive && styles.dayCardInactive]}>
-                  <TouchableOpacity
-                    style={[styles.dayCardHeader, isMobile && styles.dayCardHeaderMobile]}
-                    onPress={() => setEditingDay(isExpanded ? null : dow)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.dayCardLeft}>
-                      <TouchableOpacity
-                        style={[styles.toggleCircle, isActive && styles.toggleCircleActive]}
-                        onPress={() => toggleDay(dow)}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        {isActive && <Ionicons name="checkmark" size={14} color={colors.white} />}
-                      </TouchableOpacity>
-                      <Text style={[styles.dayName, !isActive && styles.dayNameInactive]}>
-                        {DAYS_ES[dow]}
-                      </Text>
-                      {day.is_override ? (
-                        <View style={styles.overrideDot}>
-                          <Ionicons name="pencil" size={9} color={colors.info} />
-                        </View>
-                      ) : null}
-                    </View>
-                    <View style={styles.dayCardRight}>
-                      {isActive ? (
-                        <Text style={styles.dayTimePreview}>
-                          {format12Display(day.start_time)} - {format12Display(day.end_time)}
-                        </Text>
-                      ) : (
-                        <Text style={styles.dayClosedText}>Cerrado</Text>
-                      )}
-                      <Ionicons
-                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={18}
-                        color={colors.gray400}
-                      />
-                    </View>
-                  </TouchableOpacity>
-
-                  {isExpanded && (
-                    <View style={[styles.dayExpanded, isMobile && styles.dayExpandedMobile]}>
-                      {!isActive && (
-                        <View style={styles.inactiveDayHint}>
-                          <Ionicons name="lock-closed-outline" size={14} color={colors.gray500} />
-                          <Text style={styles.inactiveDayHintText}>
-                            Activa este día para editar su horario.
-                          </Text>
-                        </View>
-                      )}
-                      <View style={[styles.timeRow, isMobile && styles.timeRowMobile, !isActive && styles.timeRowDisabled]}>
-                        {renderTimeInput(dow, 'start_time', day.start_time, 'Desde', !isActive)}
-                        <View style={styles.timeDivider}>
-                          <Ionicons name="arrow-forward" size={16} color={colors.gray300} />
-                        </View>
-                        {renderTimeInput(dow, 'end_time', day.end_time, 'Hasta', !isActive)}
-                      </View>
-                      <TouchableOpacity
-                        style={styles.copyBtn}
-                        onPress={() => copyToAll(dow)}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="copy-outline" size={16} color={colors.info} />
-                        <Text style={styles.copyBtnText}>Copiar a todos los dias</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {!weekContext.isCurrentWeek && hasOverrides && !isDirty ? (
           <TouchableOpacity
-            style={[styles.resetBtn, resetting && styles.resetBtnDisabled]}
-            onPress={() => void handleResetOverrides()}
-            disabled={resetting}
-            activeOpacity={0.7}
+            style={styles.todayBtn}
+            onPress={() => setWeekOffset(0)}
+            activeOpacity={0.75}
           >
-            {resetting ? (
-              <ActivityIndicator size="small" color={colors.info} />
-            ) : (
-              <Ionicons name="refresh-outline" size={16} color={colors.info} />
-            )}
-            <Text style={styles.resetBtnText}>
-              {resetting ? 'Eliminando...' : 'Usar horario base esta semana'}
-            </Text>
+            <Text style={styles.todayBtnText}>Hoy</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Summary stats */}
+        {availability.length > 0 ? (
+          <AvailabilitySummary availability={availability} />
+        ) : null}
+
+        {/* Notice banner */}
+        {notice ? (
+          <TouchableOpacity
+            style={styles.noticeBanner}
+            onPress={() => setNotice(null)}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={16}
+              color={colors.success}
+            />
+            <Text style={styles.noticeText}>{notice}</Text>
+            <Ionicons name="close" size={14} color={colors.gray500} />
           </TouchableOpacity>
         ) : null}
 
-        <TouchableOpacity
-          style={[styles.saveBtn, (!isDirty || saving) && styles.saveBtnDisabled, isMobile && styles.saveBtnMobile]}
-          activeOpacity={0.7}
-          onPress={() => void handleSave()}
-          disabled={!isDirty || saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={colors.black} />
-          ) : (
-            <Ionicons name="checkmark-circle-outline" size={20} color={!isDirty ? colors.gray500 : colors.black} />
-          )}
-          <Text style={[styles.saveBtnText, (!isDirty || saving) && styles.saveBtnTextDisabled]}>
-            {saving
-              ? 'Guardando...'
-              : weekContext.isCurrentWeek
-                ? 'Guardar disponibilidad'
-                : 'Guardar horario de esta semana'}
-          </Text>
-        </TouchableOpacity>
+        {/* Days list */}
+        <View style={styles.daysList}>
+          {DISPLAY_DAYS.map((dow) => {
+            const day =
+              availability.find((a) => a.day_of_week === dow) ??
+              defaultDay(dow);
+            const info = weekCtx.dayInfos[dow];
+            return (
+              <DayAvailabilityRow
+                key={dow}
+                day={day}
+                dayShortName={DAYS_SHORT[dow]}
+                dayDate={info?.date ?? ''}
+                dayMonth={info?.monthShort ?? ''}
+                isToday={weekCtx.isCurrentWeek && weekCtx.todayDow === dow}
+                isEditing={editingDay === dow}
+                onEdit={() => setEditingDay(editingDay === dow ? null : dow)}
+              />
+            );
+          })}
+        </View>
+
+        {/* Tips section */}
+        <View style={styles.tipsSection}>
+          <Text style={styles.tipsTitle}>Consejos</Text>
+          <View style={styles.tipsRow}>
+            <TipCard
+              icon="shield-outline"
+              title="Usa bloqueos"
+              text="Bloquea tiempos especificos como comida, vacaciones o descansos sin cambiar tu disponibilidad."
+            />
+            <TipCard
+              icon="copy-outline"
+              title="Copia tu semana"
+              text="Ahorra tiempo copiando la disponibilidad de la semana anterior y ajusta lo que necesites."
+            />
+            <TipCard
+              icon="repeat-outline"
+              title="Se consistente"
+              text="Mantener horarios consistentes te ayuda a que los clientes te encuentren mas facilmente."
+            />
+          </View>
+        </View>
       </ScrollView>
+
+      {/* Editor panel */}
+      {editingDay !== null && currentDay !== null ? (
+        <View
+          style={[
+            styles.editorWrapper,
+            isDesktop
+              ? styles.editorDesktop
+              : [styles.editorMobile, { height: editorMobileHeight }],
+          ]}
+        >
+          <DayAvailabilityEditor
+            day={currentDay}
+            dayFullName={DAYS_ES[editingDay]}
+            dateLabel={weekCtx.dayInfos[editingDay]?.fullLabel ?? ''}
+            onSave={(patch) => void handleSave(editingDay, patch)}
+            onApplyToAll={(patch) => void handleSave(editingDay, patch, true)}
+            onClose={() => {
+              setEditingDay(null);
+              setSaveError(null);
+            }}
+            isSaving={saving}
+            saveError={saveError}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
+// --- Tip card -----------------------------------------------------------------
+
+function TipCard({
+  icon,
+  title,
+  text,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  text: string;
+}) {
+  return (
+    <View style={styles.tipCard}>
+      <Ionicons name={icon} size={18} color={colors.gold} />
+      <Text style={styles.tipTitle}>{title}</Text>
+      <Text style={styles.tipText}>{text}</Text>
+    </View>
+  );
+}
+
+// --- Styles -------------------------------------------------------------------
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
-  loadingText: { ...typography.body, color: colors.gray400 },
-  errorContainer: {
+  root: { flex: 1, position: 'relative' },
+  rootDesktop: { flexDirection: 'row' },
+
+  centered: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.sm,
     padding: spacing.xl,
   },
-  errorIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  loadingText: { ...typography.body, color: colors.gray400 },
+  errorIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.error + '18',
     alignItems: 'center',
     justifyContent: 'center',
@@ -698,11 +494,11 @@ const styles = StyleSheet.create({
     color: colors.white,
     textAlign: 'center',
   },
-  errorMessage: {
+  errorMsg: {
     ...typography.bodySmall,
     color: colors.gray400,
     textAlign: 'center',
-    maxWidth: 420,
+    maxWidth: 360,
   },
   retryBtn: {
     flexDirection: 'row',
@@ -714,319 +510,134 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     marginTop: spacing.sm,
   },
-  retryBtnText: {
-    ...typography.buttonSmall,
-    color: colors.black,
-  },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: 0,
-    backgroundColor: colors.black,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray800,
-    gap: spacing.sm,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  headerTitleBlock: { flex: 1 },
-  title: { ...typography.h3, color: colors.white, fontSize: 16 },
-  subtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
+  retryText: { ...typography.buttonSmall, color: colors.black },
+
+  listPanel: { flex: 1 },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.huge },
+
   weekNav: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.sm,
-    marginHorizontal: -spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: colors.gray800,
-    backgroundColor: colors.gray900 + 'CC',
-  },
-  weekNavArrow: {
-    width: 44,
-    height: 52,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  weekNavCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 52,
-    gap: 3,
-  },
-  weekNavLabel: {
-    ...typography.bodySmall,
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  weekNavCurrentBadge: {
-    backgroundColor: colors.gold + '20',
-    borderRadius: radii.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: colors.gold + '50',
-  },
-  weekNavCurrentBadgeText: {
-    ...typography.caption,
-    color: colors.gold,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  weekNavReturnHint: {
-    ...typography.caption,
-    color: colors.gray500,
-    fontSize: 10,
-  },
-  weekNavOverrideBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.info + '18',
-    borderRadius: radii.sm,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: colors.info + '40',
-    marginTop: 2,
-  },
-  weekNavOverrideBadgeText: {
-    ...typography.caption,
-    color: colors.info,
-    fontSize: 9,
-    fontWeight: '700',
-  },
-  scrollView: { flex: 1 },
-  scrollContent: { padding: spacing.xl },
-  scrollContentMobile: { padding: spacing.md },
-  statusBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.gray900,
-    borderWidth: 1,
-    borderColor: colors.gray800,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  statusText: {
-    ...typography.bodySmall,
-    flex: 1,
-    color: colors.gray300,
-  },
-  noticeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.info + '14',
-    borderWidth: 1,
-    borderColor: colors.info + '35',
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  noticeText: {
-    ...typography.bodySmall,
-    flex: 1,
-    color: colors.gray300,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    minHeight: 220,
     backgroundColor: colors.gray900,
     borderWidth: 1,
     borderColor: colors.gray800,
     borderRadius: radii.md,
     marginBottom: spacing.lg,
+    overflow: 'hidden',
   },
-  emptyText: {
+  navArrow: {
+    width: 44,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    gap: 3,
+  },
+  navLabel: {
     ...typography.bodySmall,
-    color: colors.gray500,
+    color: colors.white,
+    fontWeight: '600',
+    fontSize: 13,
   },
-  weekPreview: {
-    flexDirection: 'row', gap: spacing.xs,
-    backgroundColor: colors.gray900, borderRadius: radii.md,
-    padding: spacing.md, marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.gray800,
+  todayBadge: {
+    backgroundColor: colors.gold + '20',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.gold + '40',
   },
-  weekPreviewMobile: { gap: spacing.sm, paddingHorizontal: spacing.sm },
-  previewCol: { flex: 1, alignItems: 'center', gap: spacing.xs, minWidth: 56 },
-  previewColMobile: { flex: undefined, width: 64 },
-  weekContextRow: {
+  todayBadgeText: {
+    ...typography.caption,
+    color: colors.gold,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  returnHint: { ...typography.caption, color: colors.gray600, fontSize: 10 },
+  todayBtn: {
+    paddingHorizontal: spacing.md,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderLeftWidth: 1,
+    borderLeftColor: colors.gray800,
+  },
+  todayBtnText: {
+    ...typography.buttonSmall,
+    color: colors.gray300,
+    fontSize: 13,
+  },
+
+  noticeBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 5,
-    marginTop: 6,
+    gap: spacing.sm,
+    backgroundColor: colors.success + '12',
+    borderWidth: 1,
+    borderColor: colors.success + '30',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
   },
-  weekContextText: {
-    ...typography.caption,
+  noticeText: { ...typography.bodySmall, color: colors.gray300, flex: 1 },
+
+  daysList: {
+    backgroundColor: colors.gray900,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    overflow: 'hidden',
+    marginBottom: spacing.lg,
+  },
+
+  editorWrapper: {},
+  editorDesktop: { width: 340 },
+  editorMobile: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray700,
+    elevation: 12,
+    zIndex: 100,
+    // height is set inline from windowHeight to ensure ScrollView fills correctly
+  },
+
+  tipsSection: { gap: spacing.md },
+  tipsTitle: {
+    ...typography.bodySmall,
     color: colors.gray500,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     fontSize: 11,
   },
-  weekContextDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.gray600,
-  },
-  previewColToday: {
-    borderRadius: 6,
+  tipsRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  tipCard: {
+    flex: 1,
+    minWidth: 140,
+    backgroundColor: colors.gray900,
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.gold + '60',
-    backgroundColor: colors.gold + '08',
-  },
-  previewDay: { ...typography.caption, color: colors.gray500, fontSize: 11, textTransform: 'uppercase', fontWeight: '600' },
-  previewDayToday: { color: colors.gold },
-  previewDate: { ...typography.caption, color: colors.gray600, fontSize: 10, marginTop: 2 },
-  previewDateToday: { color: colors.gold, fontWeight: '700' },
-  inactiveDayHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderColor: colors.gray800,
+    padding: spacing.md,
     gap: spacing.xs,
-    backgroundColor: colors.gray800,
-    borderRadius: radii.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
   },
-  inactiveDayHintText: {
+  tipTitle: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '600',
+    marginTop: spacing.xs,
+  },
+  tipText: {
     ...typography.caption,
     color: colors.gray500,
-    fontSize: 12,
-  },
-  timeInputDisabled: {
-    backgroundColor: colors.gray700,
-    color: colors.gray500,
-    borderColor: colors.gray700,
-  },
-  periodToggleDisabled: {
-    opacity: 0.4,
-  },
-  previewBar: {
-    width: '100%', height: 56, backgroundColor: colors.gold + '10',
-    borderRadius: radii.sm, alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 4, borderWidth: 1, borderColor: colors.gold + '30',
-  },
-  previewBarInactive: { backgroundColor: colors.gray800, borderColor: colors.gray700 },
-  previewTime: { ...typography.caption, color: colors.gold, fontSize: 9 },
-  previewFill: { flex: 1, width: '60%', backgroundColor: colors.gold + '30', borderRadius: 2, marginVertical: 2 },
-  previewClosed: { ...typography.caption, color: colors.gray400, fontSize: 9, marginTop: 'auto', marginBottom: 'auto' },
-  daysList: { gap: spacing.sm },
-  dayCard: {
-    backgroundColor: colors.gray900, borderRadius: radii.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.gray800,
-  },
-  dayCardInactive: { opacity: 0.55 },
-  dayCardHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    minHeight: 56,
-  },
-  dayCardHeaderMobile: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, minHeight: 52 },
-  dayCardLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  toggleCircle: {
-    width: 28, height: 28, borderRadius: 14, borderWidth: 2,
-    borderColor: colors.gray800, justifyContent: 'center', alignItems: 'center',
-  },
-  toggleCircleActive: { backgroundColor: colors.gold, borderColor: colors.gold },
-  dayName: { ...typography.subtitle, color: colors.white, fontSize: 15 },
-  dayNameInactive: { color: colors.gray400 },
-  dayCardRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  dayTimePreview: { ...typography.bodySmall, color: colors.gray400, fontSize: 13 },
-  dayClosedText: { ...typography.bodySmall, color: colors.gray400 },
-  dayExpanded: {
-    paddingHorizontal: spacing.lg, paddingBottom: spacing.lg,
-    borderTopWidth: 1, borderTopColor: colors.gray800,
-    gap: spacing.lg, paddingTop: spacing.lg,
-  },
-  dayExpandedMobile: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, paddingTop: spacing.md },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.lg },
-  timeRowMobile: { flexDirection: 'column', gap: spacing.md },
-  timeRowDisabled: { opacity: 0.75 },
-  timeField: { flex: 1, gap: spacing.xs },
-  timeLabel: {
-    ...typography.caption, color: colors.gray400, textTransform: 'uppercase',
-    letterSpacing: 0.8, fontSize: 11, fontWeight: '600',
-  },
-  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  inputGroup: {},
-  timeInput: {
-    width: 52, height: 48,
-    borderWidth: 1, borderColor: colors.gray800, borderRadius: radii.md,
-    textAlign: 'center', fontSize: 18, fontWeight: '600',
-    color: colors.white, backgroundColor: colors.gray800,
-  },
-  timeSeparator: {
-    fontSize: 20, fontWeight: '700', color: colors.gray400, marginHorizontal: 2,
-  },
-  periodToggle: {
-    flexDirection: 'row', borderRadius: radii.md, borderWidth: 1,
-    borderColor: colors.gray800, overflow: 'hidden', marginLeft: spacing.sm,
-    height: 48,
-  },
-  periodBtn: {
-    paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center',
-    backgroundColor: colors.gray900,
-  },
-  periodBtnActive: { backgroundColor: colors.black },
-  periodText: { fontSize: 13, fontWeight: '600', color: colors.gray500 },
-  periodTextActive: { color: colors.white },
-  timeDivider: { justifyContent: 'center', alignItems: 'center', paddingBottom: 2, paddingHorizontal: spacing.xs },
-  copyBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    alignSelf: 'flex-start', paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm, borderRadius: radii.sm,
-  },
-  copyBtnText: { ...typography.bodySmall, color: colors.info, fontWeight: '500' },
-  saveBtn: {
-    backgroundColor: colors.gold, paddingVertical: spacing.lg,
-    borderRadius: radii.md, alignItems: 'center', justifyContent: 'center',
-    flexDirection: 'row', gap: spacing.sm,
-    marginTop: spacing.xl, marginBottom: spacing.huge,
-  },
-  saveBtnDisabled: {
-    backgroundColor: colors.gray800,
-    borderWidth: 1,
-    borderColor: colors.gray700,
-  },
-  saveBtnMobile: { paddingVertical: spacing.md, marginTop: spacing.lg },
-  saveBtnText: { ...typography.button, color: colors.black },
-  saveBtnTextDisabled: { color: colors.gray500 },
-  overrideDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.info + '20',
-    borderWidth: 1,
-    borderColor: colors.info + '50',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.xs,
-  },
-  resetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: colors.info + '50',
-    borderRadius: radii.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.info + '08',
-  },
-  resetBtnDisabled: { opacity: 0.5 },
-  resetBtnText: {
-    ...typography.bodySmall,
-    color: colors.info,
-    fontWeight: '600',
+    lineHeight: 16,
   },
 });

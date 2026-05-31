@@ -1,6 +1,7 @@
 import type { TimeSlot, DaySummary } from '../types/models';
 import type { WeeklyAvailability, TimeBlock } from '../types/database';
-import { getOwnerTimeBlocks, createOwnerTimeBlock, deleteOwnerTimeBlock, getOwnerWeeklyAvailability, updateOwnerWeeklyAvailability, deleteWeekOverride } from './ownerApi';
+import { getOwnerTimeBlocks, createOwnerTimeBlock, deleteOwnerTimeBlock, getOwnerWeeklyAvailability, updateOwnerWeeklyAvailability, deleteWeekOverride, updateOwnerTimeBlock } from './ownerApi';
+import type { OwnerTimeBlockUpdateInput } from '../types/api';
 export { deleteWeekOverride };
 import type { DayOfWeek } from '../types/enums';
 import { formatLocalDateKey } from '../utils/date';
@@ -92,6 +93,16 @@ export async function createTimeBlock(block: Omit<TimeBlock, 'id' | 'created_at'
 
 export async function deleteTimeBlock(id: string): Promise<void> {
   await deleteOwnerTimeBlock(id);
+}
+
+/**
+ * Update a time block. Accepts a raw UUID (not the composite id:date format).
+ */
+export async function updateTimeBlock(
+  rawId: string,
+  payload: OwnerTimeBlockUpdateInput
+): Promise<void> {
+  await updateOwnerTimeBlock(rawId, payload);
 }
 
 export async function fetchWeeklyAvailability(

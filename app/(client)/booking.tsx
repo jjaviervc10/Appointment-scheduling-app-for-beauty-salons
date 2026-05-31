@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -16,7 +17,8 @@ import { colors, spacing, typography, radii, shadows } from '../../src/theme';
 import { MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS } from '../../src/services/mock-data';
 import { BookingWizardModal, type BookingSubmitInput } from '../../src/components/modals/BookingWizardModal';
 import type { TimeSlot } from '../../src/types/models';
-import { createPublicBookingRequest } from '../../src/services/bookingApi';
+import { createPublicBookingRequest, getPublicAvailability, getPublicServices } from '../../src/services/bookingApi';
+import type { PublicAvailabilityResponse } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -101,6 +103,24 @@ function formatHour(minutes: number) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+function getWeekStart(dayKey: string): string {
+  const d = new Date(dayKey + 'T12:00:00');
+  const dow = d.getDay();
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return fmt(d);
+}
+
+function apiSlotToTimeSlot(slot: { slotStartAt: string; slotEndAt: string }): import('../../src/types/models').TimeSlot {
+  const start = new Date(slot.slotStartAt);
+  const end = new Date(slot.slotEndAt);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
+    endTime: `${pad(end.getHours())}:${pad(end.getMinutes())}`,
+    isAvailable: true,
+  };
+}
+
 // ── component ────────────────────────────────────────────────────
 export default function BookingScreen() {
   const todayStr = fmt(new Date());
@@ -110,6 +130,12 @@ export default function BookingScreen() {
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
+
+  // ── Real availability API state ────────────────────────────────
+  const [primaryServiceId, setPrimaryServiceId] = useState<string | null>(null);
+  const [apiWeekData, setApiWeekData] = useState<PublicAvailabilityResponse | null>(null);
+  const [apiWeekLoading, setApiWeekLoading] = useState(false);
+  const [apiWeekError, setApiWeekError] = useState<string | null>(null);
 
   const selDateObj = new Date(selectedDate + 'T12:00:00');
   const [calYear, setCalYear] = useState(todayObj.getFullYear());
@@ -127,6 +153,51 @@ export default function BookingScreen() {
     () => weekDates.map((d) => ({ ...d, freeCount: countFreeSlots(d.date), slots: buildAvailableSlots(d.date, SLOT_DURATION) })),
     [weekDates]
   );
+
+  // Week start key used as the API parameter (ISO Monday date)
+  const weekStartKey = useMemo(() => getWeekStart(selectedDate), [selectedDate]);
+
+  // Slots from API grouped by local date key
+  const slotsGroupedByDate = useMemo(() => {
+    if (!apiWeekData?.slots) return {} as Record<string, import('../../src/types/models').TimeSlot[]>;
+    const groups: Record<string, import('../../src/types/models').TimeSlot[]> = {};
+    for (const slot of apiWeekData.slots) {
+      const dk = fmt(new Date(slot.slotStartAt));
+      if (!groups[dk]) groups[dk] = [];
+      groups[dk].push(apiSlotToTimeSlot(slot));
+    }
+    return groups;
+  }, [apiWeekData]);
+
+  // Load primary service ID once on mount
+  useEffect(() => {
+    getPublicServices()
+      .then((services) => setPrimaryServiceId(services[0]?.id ?? null))
+      .catch(() => undefined);
+  }, []);
+
+  // Reload week availability whenever the visible week or view mode changes
+  useEffect(() => {
+    if (!primaryServiceId || viewMode === 'mes') {
+      setApiWeekData(null);
+      setApiWeekError(null);
+      return;
+    }
+    let cancelled = false;
+    setApiWeekLoading(true);
+    setApiWeekError(null);
+    setApiWeekData(null);
+    getPublicAvailability(primaryServiceId, weekStartKey)
+      .then((response) => { if (!cancelled) setApiWeekData(response); })
+      .catch(() => {
+        if (!cancelled) {
+          setApiWeekData(null);
+          setApiWeekError('No se pudo cargar la disponibilidad.');
+        }
+      })
+      .finally(() => { if (!cancelled) setApiWeekLoading(false); });
+    return () => { cancelled = true; };
+  }, [primaryServiceId, weekStartKey, viewMode]);
 
   const handleDateSelect = useCallback((date: string) => {
     setSelectedDate(date);
@@ -287,110 +358,131 @@ export default function BookingScreen() {
               </TouchableOpacity>
             </View>
 
-            {weekAvailability.map((day) => {
-              const isExpanded = expandedDay === day.date;
-              const freeSlots = day.slots.filter((s) => s.isAvailable);
-              const dotColor = getDotColor(day.freeCount);
-              const morningSlots = freeSlots.filter((s) => parseInt(s.startTime) < 12);
-              const afternoonSlots = freeSlots.filter((s) => parseInt(s.startTime) >= 12);
+            {(!primaryServiceId || apiWeekLoading) ? (
+              <View style={styles.apiStatusBox}>
+                <ActivityIndicator color={colors.gold} />
+                <Text style={styles.apiStatusText}>Cargando disponibilidad…</Text>
+              </View>
+            ) : apiWeekError ? (
+              <View style={styles.apiStatusBox}>
+                <Ionicons name="alert-circle-outline" size={20} color={colors.error} />
+                <Text style={[styles.apiStatusText, { color: colors.error }]}>{apiWeekError}</Text>
+              </View>
+            ) : apiWeekData?.weekAvailable === false ? (
+              <View style={styles.apiUnavailableBox}>
+                <Ionicons name="calendar-outline" size={28} color={colors.gray500} />
+                <Text style={styles.apiUnavailableText}>
+                  {apiWeekData.message ?? 'Esta semana aún no está disponible para reservas.'}
+                </Text>
+                <Text style={styles.apiUnavailableHint}>Prueba navegando a otra semana.</Text>
+              </View>
+            ) : apiWeekData?.weekAvailable === true ? (
+              weekDates.map((day) => {
+                const isExpanded = expandedDay === day.date;
+                const dayApiSlots = slotsGroupedByDate[day.date] ?? [];
+                const freeCount = dayApiSlots.length;
+                const dotColor = getDotColor(freeCount);
+                const morningSlots = dayApiSlots.filter((s) => parseInt(s.startTime) < 12);
+                const afternoonSlots = dayApiSlots.filter((s) => parseInt(s.startTime) >= 12);
 
-              return (
-                <View key={day.date}>
-                  {/* Collapsed row */}
-                  <TouchableOpacity
-                    style={[styles.weekRow, isExpanded && styles.weekRowExpanded]}
-                    onPress={() => {
-                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                      setExpandedDay(isExpanded ? null : day.date);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.weekDayCol}>
-                      <Text style={[styles.weekDayLabel, isExpanded && { color: colors.white }]}>{day.dayLabel}</Text>
-                      <Text style={[styles.weekDayNum, isExpanded && { color: colors.white }]}>{day.dayNum}</Text>
-                    </View>
-                    <View style={styles.weekBarCol}>
-                      <View style={styles.weekBarBg}>
-                        <View style={[styles.weekBarFill, { width: `${Math.min(100, (day.freeCount / 12) * 100)}%` as any, backgroundColor: dotColor }]} />
+                return (
+                  <View key={day.date}>
+                    {/* Collapsed row */}
+                    <TouchableOpacity
+                      style={[styles.weekRow, isExpanded && styles.weekRowExpanded]}
+                      onPress={() => {
+                        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                        setExpandedDay(isExpanded ? null : day.date);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.weekDayCol}>
+                        <Text style={[styles.weekDayLabel, isExpanded && { color: colors.white }]}>{day.dayLabel}</Text>
+                        <Text style={[styles.weekDayNum, isExpanded && { color: colors.white }]}>{day.dayNum}</Text>
                       </View>
-                    </View>
-                    <View style={[styles.weekFreeBadge, { backgroundColor: dotColor + '18' }]}>
-                      <Text style={[styles.weekFreeBadgeText, { color: dotColor }]}>
-                        {day.freeCount === 0 ? 'Lleno' : `${day.freeCount} libres`}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color={isExpanded ? colors.white : colors.gray400}
-                    />
-                  </TouchableOpacity>
-
-                  {/* Expanded slot grid */}
-                  {isExpanded && (
-                    <View style={styles.accordionBody}>
-                      {freeSlots.length === 0 ? (
-                        <View style={styles.accordionEmpty}>
-                          <Ionicons name="close-circle-outline" size={24} color={colors.gray300} />
-                          <Text style={styles.accordionEmptyText}>Sin disponibilidad este día</Text>
+                      <View style={styles.weekBarCol}>
+                        <View style={styles.weekBarBg}>
+                          <View style={[styles.weekBarFill, { width: `${Math.min(100, (freeCount / 12) * 100)}%` as any, backgroundColor: dotColor }]} />
                         </View>
-                      ) : (
-                        <>
-                          {morningSlots.length > 0 && (
-                            <>
-                              <View style={styles.accordionGroupHeader}>
-                                <Ionicons name="sunny-outline" size={14} color={colors.gold} />
-                                <Text style={styles.accordionGroupLabel}>Mañana</Text>
-                              </View>
-                              <View style={styles.accordionGrid}>
-                                {morningSlots.map((slot) => {
-                                  const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
-                                  return (
-                                    <TouchableOpacity
-                                      key={slot.startTime}
-                                      style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
-                                      onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
-                                      activeOpacity={0.7}
-                                    >
-                                      <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
-                                      <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
-                                    </TouchableOpacity>
-                                  );
-                                })}
-                              </View>
-                            </>
-                          )}
-                          {afternoonSlots.length > 0 && (
-                            <>
-                              <View style={styles.accordionGroupHeader}>
-                                <Ionicons name="moon-outline" size={14} color={colors.info} />
-                                <Text style={styles.accordionGroupLabel}>Tarde</Text>
-                              </View>
-                              <View style={styles.accordionGrid}>
-                                {afternoonSlots.map((slot) => {
-                                  const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
-                                  return (
-                                    <TouchableOpacity
-                                      key={slot.startTime}
-                                      style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
-                                      onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
-                                      activeOpacity={0.7}
-                                    >
-                                      <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
-                                      <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
-                                    </TouchableOpacity>
-                                  );
-                                })}
-                              </View>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+                      </View>
+                      <View style={[styles.weekFreeBadge, { backgroundColor: dotColor + '18' }]}>
+                        <Text style={[styles.weekFreeBadgeText, { color: dotColor }]}>
+                          {freeCount === 0 ? 'Lleno' : `${freeCount} libres`}
+                        </Text>
+                      </View>
+                      <Ionicons
+                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color={isExpanded ? colors.white : colors.gray400}
+                      />
+                    </TouchableOpacity>
+
+                    {/* Expanded slot grid */}
+                    {isExpanded && (
+                      <View style={styles.accordionBody}>
+                        {dayApiSlots.length === 0 ? (
+                          <View style={styles.accordionEmpty}>
+                            <Ionicons name="close-circle-outline" size={24} color={colors.gray300} />
+                            <Text style={styles.accordionEmptyText}>Sin disponibilidad este día</Text>
+                          </View>
+                        ) : (
+                          <>
+                            {morningSlots.length > 0 && (
+                              <>
+                                <View style={styles.accordionGroupHeader}>
+                                  <Ionicons name="sunny-outline" size={14} color={colors.gold} />
+                                  <Text style={styles.accordionGroupLabel}>Mañana</Text>
+                                </View>
+                                <View style={styles.accordionGrid}>
+                                  {morningSlots.map((slot) => {
+                                    const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
+                                    return (
+                                      <TouchableOpacity
+                                        key={slot.startTime}
+                                        style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
+                                        onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
+                                        activeOpacity={0.7}
+                                      >
+                                        <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
+                                        <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </>
+                            )}
+                            {afternoonSlots.length > 0 && (
+                              <>
+                                <View style={styles.accordionGroupHeader}>
+                                  <Ionicons name="moon-outline" size={14} color={colors.info} />
+                                  <Text style={styles.accordionGroupLabel}>Tarde</Text>
+                                </View>
+                                <View style={styles.accordionGrid}>
+                                  {afternoonSlots.map((slot) => {
+                                    const isSel = selectedSlot?.startTime === slot.startTime && selectedDate === day.date;
+                                    return (
+                                      <TouchableOpacity
+                                        key={slot.startTime}
+                                        style={[styles.accordionSlot, isSel && styles.accordionSlotActive]}
+                                        onPress={() => { setSelectedDate(day.date); handleSlotSelect(slot); }}
+                                        activeOpacity={0.7}
+                                      >
+                                        <Text style={[styles.accordionSlotTime, isSel && { color: colors.white }]}>{slot.startTime}</Text>
+                                        <Text style={[styles.accordionSlotEnd, isSel && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            ) : null}
           </View>
         )}
 
@@ -426,55 +518,63 @@ export default function BookingScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Summary badge */}
-            <View style={styles.daySummaryRow}>
-              <View style={[styles.daySummaryBadge, { backgroundColor: colors.statusConfirmed + '15' }]}>
-                <Text style={[styles.daySummaryText, { color: colors.statusConfirmed }]}>
-                  {daySlots.filter((s) => s.isAvailable).length} libres
-                </Text>
+            {(!primaryServiceId || apiWeekLoading) ? (
+              <View style={styles.apiStatusBox}>
+                <ActivityIndicator color={colors.gold} />
+                <Text style={styles.apiStatusText}>Cargando disponibilidad…</Text>
               </View>
-              <View style={[styles.daySummaryBadge, { backgroundColor: colors.error + '15' }]}>
-                <Text style={[styles.daySummaryText, { color: colors.error }]}>
-                  {daySlots.filter((s) => !s.isAvailable).length} ocupados
-                </Text>
+            ) : apiWeekError ? (
+              <View style={styles.apiStatusBox}>
+                <Ionicons name="alert-circle-outline" size={20} color={colors.error} />
+                <Text style={[styles.apiStatusText, { color: colors.error }]}>{apiWeekError}</Text>
               </View>
-            </View>
-
-            {/* Hour timeline */}
-            {daySlots.map((slot) => {
-              const isAvail = slot.isAvailable;
-              const isSlotSelected = selectedSlot?.startTime === slot.startTime;
-              return (
-                <TouchableOpacity
-                  key={slot.startTime}
-                  style={[
-                    styles.daySlotRow,
-                    !isAvail && styles.daySlotOccupied,
-                    isSlotSelected && styles.daySlotSelected,
-                  ]}
-                  onPress={() => isAvail && handleSlotSelect(slot)}
-                  activeOpacity={isAvail ? 0.7 : 1}
-                  disabled={!isAvail}
-                >
-                  <Text style={[styles.daySlotTime, isSlotSelected && { color: colors.white }]}>{slot.startTime}</Text>
-                  <View style={styles.daySlotDivider} />
-                  <View style={styles.daySlotContent}>
-                    {isAvail ? (
-                      <View style={styles.daySlotAvail}>
-                        <Ionicons name="checkmark-circle" size={16} color={isSlotSelected ? colors.white : colors.statusConfirmed} />
-                        <Text style={[styles.daySlotAvailText, isSlotSelected && { color: colors.white }]}>Disponible</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.daySlotAvail}>
-                        <Ionicons name="lock-closed" size={14} color={colors.gray400} />
-                        <Text style={styles.daySlotOccText}>Ocupado</Text>
-                      </View>
-                    )}
+            ) : apiWeekData?.weekAvailable === false ? (
+              <View style={styles.apiUnavailableBox}>
+                <Ionicons name="calendar-outline" size={28} color={colors.gray500} />
+                <Text style={styles.apiUnavailableText}>
+                  {apiWeekData.message ?? 'Esta semana aún no está disponible para reservas.'}
+                </Text>
+                <Text style={styles.apiUnavailableHint}>Prueba navegando a otra semana.</Text>
+              </View>
+            ) : apiWeekData?.weekAvailable === true ? (
+              <>
+                <View style={styles.daySummaryRow}>
+                  <View style={[styles.daySummaryBadge, { backgroundColor: colors.statusConfirmed + '15' }]}>
+                    <Text style={[styles.daySummaryText, { color: colors.statusConfirmed }]}>
+                      {(slotsGroupedByDate[selectedDate] ?? []).length} libres
+                    </Text>
                   </View>
-                  <Text style={[styles.daySlotEnd, isSlotSelected && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
-                </TouchableOpacity>
-              );
-            })}
+                </View>
+                {(slotsGroupedByDate[selectedDate] ?? []).length === 0 ? (
+                  <View style={styles.apiStatusBox}>
+                    <Ionicons name="calendar-clear-outline" size={20} color={colors.gray500} />
+                    <Text style={styles.apiStatusText}>Sin horarios disponibles este día.</Text>
+                  </View>
+                ) : (
+                  (slotsGroupedByDate[selectedDate] ?? []).map((slot) => {
+                    const isSlotSelected = selectedSlot?.startTime === slot.startTime;
+                    return (
+                      <TouchableOpacity
+                        key={slot.startTime}
+                        style={[styles.daySlotRow, isSlotSelected && styles.daySlotSelected]}
+                        onPress={() => handleSlotSelect(slot)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.daySlotTime, isSlotSelected && { color: colors.white }]}>{slot.startTime}</Text>
+                        <View style={styles.daySlotDivider} />
+                        <View style={styles.daySlotContent}>
+                          <View style={styles.daySlotAvail}>
+                            <Ionicons name="checkmark-circle" size={16} color={isSlotSelected ? colors.white : colors.statusConfirmed} />
+                            <Text style={[styles.daySlotAvailText, isSlotSelected && { color: colors.white }]}>Disponible</Text>
+                          </View>
+                        </View>
+                        <Text style={[styles.daySlotEnd, isSlotSelected && { color: colors.white + 'AA' }]}>{slot.endTime}</Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </>
+            ) : null}
           </View>
         )}
 
@@ -617,6 +717,23 @@ const styles = StyleSheet.create({
   daySlotAvailText: { ...typography.bodySmall, color: colors.statusConfirmed, fontWeight: '600' },
   daySlotOccText: { ...typography.bodySmall, color: colors.gray400 },
   daySlotEnd: { ...typography.caption, color: colors.gray400, fontSize: 11 },
+
+  // API status / unavailable states
+  apiStatusBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+  },
+  apiStatusText: { ...typography.bodySmall, color: colors.gray400 },
+  apiUnavailableBox: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+  apiUnavailableText: { ...typography.body, color: colors.gray500, textAlign: 'center' },
+  apiUnavailableHint: { ...typography.bodySmall, color: colors.gray600, textAlign: 'center' },
 
 
 });

@@ -193,8 +193,8 @@ export default function MiniAppRescheduleScreen() {
       setAvailabilityError(null);
       setSelectedSlotStartAt('');
 
-      const slots = await getPublicAvailability(selectedAppointment.serviceId, getWeekStart(selectedDate));
-      setAvailabilitySlots(slots);
+      const availResponse = await getPublicAvailability(selectedAppointment.serviceId, getWeekStart(selectedDate));
+      setAvailabilitySlots(availResponse.slots);
     } catch (error) {
       setAvailabilitySlots([]);
       setAvailabilityError(isHttpError(error) ? mapErrorMessage(error.status) : 'No se pudieron cargar horarios.');

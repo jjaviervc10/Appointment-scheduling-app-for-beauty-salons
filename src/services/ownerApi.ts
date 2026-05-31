@@ -26,6 +26,10 @@ import type {
   OwnerSettingsResponse,
   CreateIncidentInput,
   CreateIncidentResponse,
+  OwnerIncident,
+  OwnerIncidentsResponse,
+  OwnerTimeBlockUpdateInput,
+  OwnerTimeBlockUpdateResponse,
   OwnerMessagesDiagnosticsResponse,
   SendOwnerMessageNowResponse,
 } from '../types/api';
@@ -432,4 +436,47 @@ export async function sendOwnerMessageNow(
     }
   );
   return response.message;
+}
+
+// ─── Incidents (GET / DELETE) ─────────────────────────────────────────────────
+
+export async function getOwnerIncidents(
+  startDate: string,
+  endDate: string,
+  includeResolved = false
+): Promise<OwnerIncident[]> {
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+  });
+  if (includeResolved) params.set('include_resolved', 'true');
+  const response = await apiRequest<OwnerIncidentsResponse>(
+    `/api/owner/incidents?${params.toString()}`,
+    { requiresOwnerAuth: true }
+  );
+  return response.data;
+}
+
+export async function deleteOwnerIncident(id: string): Promise<void> {
+  await apiRequest<void>(
+    `/api/owner/incidents/${encodeURIComponent(id)}`,
+    { method: 'DELETE', requiresOwnerAuth: true }
+  );
+}
+
+// ─── Time blocks (PUT) ────────────────────────────────────────────────────────
+
+export async function updateOwnerTimeBlock(
+  id: string,
+  payload: OwnerTimeBlockUpdateInput
+): Promise<OwnerTimeBlockRow> {
+  const response = await apiRequest<OwnerTimeBlockUpdateResponse>(
+    `/api/owner/time-blocks/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      body: payload,
+      requiresOwnerAuth: true,
+    }
+  );
+  return response.timeBlock;
 }

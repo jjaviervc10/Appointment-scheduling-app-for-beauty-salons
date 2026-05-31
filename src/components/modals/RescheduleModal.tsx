@@ -134,8 +134,9 @@ export function RescheduleModal({ visible, appointment, onClose, onSimulationCom
     setAvailabilityError(null);
 
     getPublicAvailability(appointment.serviceId, availabilityWeekKey)
-      .then((slots) => {
+      .then((availResponse) => {
         if (cancelled) return;
+        const slots = availResponse.slots;
         const next: AvailableSlotMap = {};
         slots.forEach((slot) => {
           const start = new Date(slot.slotStartAt);

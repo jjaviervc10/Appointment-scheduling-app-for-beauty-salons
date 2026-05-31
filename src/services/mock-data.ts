@@ -212,6 +212,77 @@ export const MOCK_TIME_BLOCKS: TimeBlock[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Demo mode: rich set of today's appointments covering ALL statuses
+// Used by the dashboard "Modo Demo" toggle for UI testing.
+// ---------------------------------------------------------------------------
+export const MOCK_DEMO_APPOINTMENTS: AppointmentViewModel[] = [
+  {
+    id: 'demo-1', clientName: 'Carlos Méndez', clientPhone: '+52 1 555 5678',
+    serviceName: 'Corte de cabello', durationMinutes: 45, status: 'client_confirmed',
+    startAt: new Date(fmt(today) + 'T09:00:00'), endAt: new Date(fmt(today) + 'T09:45:00'),
+    notes: null,
+  },
+  {
+    id: 'demo-2', clientName: 'Ana López', clientPhone: '+52 1 555 1234',
+    serviceName: 'Peinado especial', durationMinutes: 60, status: 'pending_owner_approval',
+    startAt: new Date(fmt(today) + 'T10:00:00'), endAt: new Date(fmt(today) + 'T11:00:00'),
+    notes: 'Primera vez en el salón',
+  },
+  {
+    id: 'demo-3', clientName: 'Lucía Ramírez', clientPhone: '+52 1 555 9012',
+    serviceName: 'Tinte para barba', durationMinutes: 30, status: 'confirmed_by_owner',
+    startAt: new Date(fmt(today) + 'T10:30:00'), endAt: new Date(fmt(today) + 'T11:00:00'),
+    notes: null,
+  },
+  {
+    id: 'demo-4', clientName: 'Diana Torres', clientPhone: '+52 1 555 6789',
+    serviceName: 'Peinado especial', durationMinutes: 60, status: 'awaiting_client_confirmation',
+    startAt: new Date(fmt(today) + 'T11:30:00'), endAt: new Date(fmt(today) + 'T12:30:00'),
+    notes: 'Cliente pidió horario vespertino pero se acomodó en mañana',
+  },
+  {
+    id: 'demo-5', clientName: 'Roberto Sánchez', clientPhone: '+52 1 555 2345',
+    serviceName: 'Corte de barba', durationMinutes: 30, status: 'reschedule_required',
+    startAt: new Date(fmt(today) + 'T13:00:00'), endAt: new Date(fmt(today) + 'T13:30:00'),
+    notes: null,
+  },
+  {
+    id: 'demo-6', clientName: 'Martha Ruiz', clientPhone: '+52 1 555 3456',
+    serviceName: 'Corte de cabello', durationMinutes: 45, status: 'pending_owner_approval',
+    startAt: new Date(fmt(today) + 'T15:30:00'), endAt: new Date(fmt(today) + 'T16:15:00'),
+    notes: null,
+  },
+  {
+    id: 'demo-7', clientName: 'María García', clientPhone: '+52 1 555 7890',
+    serviceName: 'Corte de barba', durationMinutes: 30, status: 'confirmed_by_owner',
+    startAt: new Date(fmt(today) + 'T17:00:00'), endAt: new Date(fmt(today) + 'T17:30:00'),
+    notes: null,
+  },
+  {
+    id: 'demo-8', clientName: 'Fernando Ruiz', clientPhone: '+52 1 555 4321',
+    serviceName: 'Peinado especial', durationMinutes: 60, status: 'client_confirmed',
+    startAt: new Date(fmt(today) + 'T18:00:00'), endAt: new Date(fmt(today) + 'T19:00:00'),
+    notes: null,
+  },
+];
+
+export const MOCK_DEMO_PENDING: AppointmentViewModel[] = MOCK_DEMO_APPOINTMENTS.filter(
+  a => a.status === 'pending_owner_approval',
+);
+
+export const MOCK_DEMO_AWAITING: AppointmentViewModel[] = MOCK_DEMO_APPOINTMENTS.filter(
+  a => a.status === 'awaiting_client_confirmation',
+);
+
+export const MOCK_DEMO_BLOCKS: import('../types/database').TimeBlock[] = [
+  {
+    id: 'demo-tb1', owner_id: 'owner1', block_type: 'comida', label: 'Comida',
+    date: fmt(today), start_time: '14:00', end_time: '15:00',
+    is_recurring: true, recurrence_day_of_week: null, notes: null, created_at: today.toISOString(),
+  },
+];
+
 export const MOCK_INCIDENTS: Incident[] = [
   {
     id: 'inc1', owner_id: 'owner1', title: 'Imprevisto familiar',

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -11,13 +11,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../../theme';
-import { createTimeBlock } from '../../services/availability';
+import { createTimeBlock, updateTimeBlock } from '../../services/availability';
 import { formatLocalDateKey } from '../../utils/date';
 import type { TimeBlock } from '../../types/database';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
+  editBlock?: TimeBlock | null;
 }
 
 const BLOCK_TYPES = [
@@ -25,8 +26,12 @@ const BLOCK_TYPES = [
   { key: 'comida', label: 'Comida', icon: 'restaurant' as const, color: '#FF9800' },
   { key: 'descanso', label: 'Descanso', icon: 'bed' as const, color: '#66BB6A' },
   { key: 'mandado', label: 'Mandado', icon: 'car' as const, color: '#AB47BC' },
+  { key: 'viaje', label: 'Viaje', icon: 'airplane' as const, color: '#26C6DA' },
+  { key: 'escuela', label: 'Escuela', icon: 'school' as const, color: '#7E57C2' },
   { key: 'otro', label: 'Otro', icon: 'ellipsis-horizontal' as const, color: colors.gray600 },
 ];
+
+const DOW_BUTTONS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 function clampHour(value: string): string {
   const n = parseInt(value, 10);
@@ -58,9 +63,19 @@ function minutesOfDay(time: string): number {
   return Number(hour) * 60 + Number(minute);
 }
 
-export function BlockTimeModal({ visible, onClose }: Props) {
+function parseTo12h(time: string): { hourText: string; minText: string; period: 'AM' | 'PM' } {
+  const [hourStr = '0', minStr = '00'] = time.split(':');
+  let h = parseInt(hourStr, 10);
+  const period: 'AM' | 'PM' = h >= 12 ? 'PM' : 'AM';
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return { hourText: String(h), minText: minStr.padStart(2, '0'), period };
+}
+
+export function BlockTimeModal({ visible, onClose, editBlock }: Props) {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  const isEditing = !!editBlock;
 
   const [selectedType, setSelectedType] = useState<string | null>('personal');
   const [startHourText, setStartHourText] = useState('1');
@@ -72,6 +87,7 @@ export function BlockTimeModal({ visible, onClose }: Props) {
   const [label, setLabel] = useState('Personal');
   const [notes, setNotes] = useState('');
   const [recurring, setRecurring] = useState(false);
+  const [recurringDow, setRecurringDow] = useState<number>(() => new Date().getDay());
   const [dateText, setDateText] = useState(() => formatLocalDateKey(new Date()));
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -95,9 +111,35 @@ export function BlockTimeModal({ visible, onClose }: Props) {
     setLabel('Personal');
     setNotes('');
     setRecurring(false);
+    setRecurringDow(new Date().getDay());
     setDateText(formatLocalDateKey(new Date()));
     setSubmitError(null);
   };
+
+  // Pre-populate form when opening in edit mode; reset when opening for new block
+  useEffect(() => {
+    if (!visible) return;
+    if (editBlock) {
+      setSelectedType(editBlock.block_type);
+      setLabel(editBlock.label);
+      setNotes(editBlock.notes ?? '');
+      setRecurring(editBlock.is_recurring);
+      setRecurringDow(editBlock.recurrence_day_of_week ?? new Date().getDay());
+      setDateText(editBlock.is_recurring ? formatLocalDateKey(new Date()) : (editBlock.date || formatLocalDateKey(new Date())));
+      const start = parseTo12h(editBlock.start_time);
+      const end = parseTo12h(editBlock.end_time);
+      setStartHourText(start.hourText);
+      setStartMinText(start.minText);
+      setStartPeriod(start.period);
+      setEndHourText(end.hourText);
+      setEndMinText(end.minText);
+      setEndPeriod(end.period);
+      setSubmitError(null);
+    } else {
+      resetForm();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editBlock]);
 
   const handleClose = () => {
     resetForm();
@@ -118,6 +160,27 @@ export function BlockTimeModal({ visible, onClose }: Props) {
     }
 
     setSubmitError(null);
+    if (isEditing && editBlock) {
+      const rawId = editBlock.id.split(':')[0]!;
+      try {
+        await updateTimeBlock(rawId, {
+          blockType: blockType.key,
+          reason: label.trim() || blockType.label,
+          startTime,
+          endTime,
+          isRecurring: recurring,
+          specificDate: !recurring ? resolvedDate : null,
+          dayOfWeek: recurring ? recurringDow : null,
+        });
+        resetForm();
+        onClose();
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '';
+        setSubmitError(msg || 'No se pudo guardar los cambios. Intenta de nuevo.');
+      }
+      return;
+    }
+
     const block: Omit<TimeBlock, 'id' | 'created_at'> = {
       owner_id: '',
       block_type: blockType.key as TimeBlock['block_type'],
@@ -127,7 +190,7 @@ export function BlockTimeModal({ visible, onClose }: Props) {
       end_time: endTime,
       is_recurring: recurring,
       recurrence_day_of_week: recurring
-        ? new Date().getDay() as TimeBlock['recurrence_day_of_week']
+        ? recurringDow as TimeBlock['recurrence_day_of_week']
         : null,
       notes: notes.trim() || null,
     };
@@ -153,9 +216,9 @@ export function BlockTimeModal({ visible, onClose }: Props) {
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <View style={styles.headerIcon}>
-                <Ionicons name="lock-closed" size={20} color={colors.gray800} />
+                <Ionicons name={isEditing ? 'pencil' : 'lock-closed'} size={20} color={colors.gray800} />
               </View>
-              <Text style={styles.headerTitle}>Bloquear horario</Text>
+              <Text style={styles.headerTitle}>{isEditing ? 'Editar bloqueo' : 'Bloquear horario'}</Text>
             </View>
             <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Ionicons name="close" size={24} color={colors.gray500} />
@@ -266,13 +329,37 @@ export function BlockTimeModal({ visible, onClose }: Props) {
                   Repetir cada semana
                 </Text>
                 <Text style={styles.recurringSub}>
-                  {recurring ? 'Se bloqueara cada semana en este dia' : `Solo para el ${dateText || 'dia seleccionado'}`}
+                  {recurring ? `Se bloqueará todos los ${DOW_BUTTONS[recurringDow]}` : `Solo para el ${dateText || 'dia seleccionado'}`}
                 </Text>
               </View>
               <View style={[styles.toggleTrack, recurring && styles.toggleTrackActive]}>
                 <View style={[styles.toggleThumb, recurring && styles.toggleThumbActive]} />
               </View>
             </TouchableOpacity>
+
+            {recurring ? (
+              <View style={styles.dowPickerRow}>
+                <Text style={styles.fieldLabel}>Día de la semana</Text>
+                <View style={styles.dowButtons}>
+                  {DOW_BUTTONS.map((name, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.dowBtn,
+                        recurringDow === idx && styles.dowBtnActive,
+                      ]}
+                      onPress={() => setRecurringDow(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[
+                        styles.dowBtnText,
+                        recurringDow === idx && styles.dowBtnTextActive,
+                      ]}>{name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             {submitError ? (
               <View style={styles.submitError}>
@@ -292,8 +379,8 @@ export function BlockTimeModal({ visible, onClose }: Props) {
               disabled={!selectedType || invalidRange}
               activeOpacity={0.8}
             >
-              <Ionicons name="lock-closed" size={18} color={colors.white} />
-              <Text style={styles.btnCreateText}>Guardar bloqueo</Text>
+              <Ionicons name={isEditing ? 'checkmark' : 'lock-closed'} size={18} color={colors.white} />
+              <Text style={styles.btnCreateText}>{isEditing ? 'Guardar cambios' : 'Guardar bloqueo'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -514,6 +601,24 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   toggleThumbActive: { alignSelf: 'flex-end' },
+
+  // Day-of-week picker (shown when recurring)
+  dowPickerRow: { marginTop: spacing.md },
+  dowButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  dowBtn: {
+    flex: 1,
+    minWidth: 38,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    backgroundColor: colors.gray800,
+    borderWidth: 1,
+    borderColor: colors.gray700,
+  },
+  dowBtnActive: { backgroundColor: colors.gold + '18', borderColor: colors.gold },
+  dowBtnText: { ...typography.caption, color: colors.gray400, fontWeight: '500' },
+  dowBtnTextActive: { color: colors.gold, fontWeight: '700' },
+
   submitError: {
     flexDirection: 'row',
     alignItems: 'center',
