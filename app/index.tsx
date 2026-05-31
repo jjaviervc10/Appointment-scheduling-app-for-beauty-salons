@@ -13,6 +13,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../src/theme';
+import { InstallAppPrompt } from '../src/components/pwa/InstallAppPrompt';
 
 const FEATURES = [
   { icon: 'calendar-outline' as const, title: 'Reserva fácil', desc: 'Elige día y hora\nen segundos' },
@@ -92,6 +93,10 @@ export default function SplashScreen() {
             <Text style={styles.featureDesc}>{f.desc}</Text>
           </View>
         ))}
+      </Animated.View>
+
+      <Animated.View style={{ opacity: fadeAnim }}>
+        <InstallAppPrompt />
       </Animated.View>
 
       {/* ── CTA Buttons ── */}

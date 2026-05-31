@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
+import Head from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../src/theme';
+import { ensurePwaHeadLinks, registerServiceWorker } from '../src/utils/registerServiceWorker';
 
 type FontLoadState = 'loading' | 'ready' | 'error';
 
@@ -31,6 +33,7 @@ export default function RootLayout() {
   // Web: ensure html/body/#root fill the full viewport so flex:1 chains work
   useEffect(() => {
     if (typeof document === 'undefined') return;
+    ensurePwaHeadLinks();
     const style = document.createElement('style');
     style.textContent = `html, body, #root { height: 100%; overflow: hidden; margin: 0; padding: 0; } #root { display: flex; }`;
     document.head.appendChild(style);
@@ -57,6 +60,12 @@ export default function RootLayout() {
 
   useEffect(() => loadIconFonts(), [loadIconFonts]);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      registerServiceWorker();
+    }
+  }, []);
+
   if (fontLoadState !== 'ready') {
     return (
       <View style={styles.loadingContainer}>
@@ -78,6 +87,15 @@ export default function RootLayout() {
 
   return (
     <>
+      <Head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#D4AF37" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Barber Studio" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="apple-touch-icon" href="/assets/icons/icon-192.png" />
+      </Head>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
