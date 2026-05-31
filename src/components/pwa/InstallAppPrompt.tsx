@@ -15,6 +15,14 @@ type NavigatorWithInstallState = Navigator & {
   standalone?: boolean;
 };
 
+type InstallGuide = {
+  manualHelp: string;
+  manualSteps: string[];
+  openHelp: string;
+  manualButtonText: string;
+  manualAction: 'copyLink' | 'openChrome' | 'dismiss';
+};
+
 const INSTALLED_STORAGE_KEY = 'jl-barber-pwa-installed';
 
 function wasMarkedInstalled() {
@@ -59,44 +67,121 @@ async function isAppAlreadyInstalled() {
   }
 }
 
-function getInstallHelp() {
+function getUserAgentFlags() {
   if (typeof navigator === 'undefined') {
-    return 'Abre el menu del navegador y elige instalar o agregar a pantalla de inicio.';
+    return {
+      isIOS: false,
+      isAndroid: false,
+      isFirefox: false,
+      isChromium: false,
+    };
   }
 
   const userAgent = navigator.userAgent.toLowerCase();
-  const isIOS = /iphone|ipad|ipod/.test(userAgent);
-  const isAndroid = /android/.test(userAgent);
+  const isFirefox = userAgent.includes('firefox') || userAgent.includes('fxios');
+  const isChromium =
+    userAgent.includes('chrome') ||
+    userAgent.includes('crios') ||
+    userAgent.includes('edg') ||
+    userAgent.includes('opr');
 
-  if (isIOS) {
-    return 'iPhone/Safari: toca Compartir y luego Agregar a pantalla de inicio.';
-  }
-
-  if (isAndroid) {
-    return 'Android/Chrome: abre el menu de tres puntos y toca Instalar app.';
-  }
-
-  return 'En Chrome o Edge: abre el menu del navegador y elige Instalar app.';
+  return {
+    isIOS: /iphone|ipad|ipod/.test(userAgent),
+    isAndroid: /android/.test(userAgent),
+    isFirefox,
+    isChromium,
+  };
 }
 
-function getOpenInstalledHelp() {
-  if (typeof navigator === 'undefined') {
-    return 'Busca Barber Studio entre tus aplicaciones instaladas.';
-  }
+function getCurrentInstallUrl() {
+  if (typeof window === 'undefined') return '';
 
-  const userAgent = navigator.userAgent.toLowerCase();
-  const isIOS = /iphone|ipad|ipod/.test(userAgent);
-  const isAndroid = /android/.test(userAgent);
+  const url = new URL(window.location.href);
+  url.searchParams.set('pwaInstall', '1');
+  return url.toString();
+}
+
+function getChromeIntentUrl(targetUrl: string) {
+  const urlWithoutProtocol = targetUrl.replace(/^https?:\/\//, '');
+  return `intent://${urlWithoutProtocol}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(
+    targetUrl
+  )};end`;
+}
+
+function getInstallGuide(): InstallGuide {
+  const { isIOS, isAndroid, isFirefox, isChromium } = getUserAgentFlags();
 
   if (isIOS) {
-    return 'La app queda en tu pantalla de inicio. Busca el icono Barber Studio y abrelo desde ahi.';
+    return {
+      manualHelp: 'En iPhone la instalacion se hace desde Safari.',
+      manualSteps: [
+        'Abre este link en Safari.',
+        'Toca Compartir.',
+        'Elige Agregar a pantalla de inicio.',
+      ],
+      openHelp: 'La app queda en tu pantalla de inicio. Busca el icono Barber Studio y abrelo desde ahi.',
+      manualButtonText: 'Ver pasos',
+      manualAction: 'dismiss',
+    };
   }
 
-  if (isAndroid) {
-    return 'La app queda en tu pantalla de inicio o cajon de apps. Tambien puedes tocar Abrir en aplicacion si Chrome lo muestra arriba.';
+  if (isFirefox && isAndroid) {
+    return {
+      manualHelp: 'Firefox no siempre permite instalar desde este boton. Te llevamos a Chrome para terminar.',
+      manualSteps: [
+        'Toca Abrir en Chrome.',
+        'Cuando abra la pagina, toca Instalar aplicacion.',
+        'Confirma la instalacion en Chrome.',
+      ],
+      openHelp:
+        'La app queda en tu pantalla de inicio o cajon de apps. Si no la ves, buscala como Barber Studio.',
+      manualButtonText: 'Abrir en Chrome',
+      manualAction: 'openChrome',
+    };
   }
 
-  return 'Chrome puede mostrar Abrir en aplicacion en la barra superior. Si no, busca Barber Studio en tus aplicaciones.';
+  if (isFirefox) {
+    return {
+      manualHelp: 'Firefox en computadora no permite instalar esta app desde este boton.',
+      manualSteps: [
+        'Copia este link.',
+        'Abre Chrome o Edge.',
+        'Pega el link y toca Instalar aplicacion cuando aparezca.',
+      ],
+      openHelp:
+        'En computadora, Chrome o Edge pueden mostrar Abrir en aplicacion en la barra superior. Tambien puedes buscar Barber Studio entre tus aplicaciones.',
+      manualButtonText: 'Copiar link',
+      manualAction: 'copyLink',
+    };
+  }
+
+  if (isAndroid || isChromium) {
+    return {
+      manualHelp: 'Tu navegador puede instalarla desde su menu.',
+      manualSteps: [
+        'Abre el menu de tres puntos.',
+        'Toca Instalar app o Agregar a pantalla principal.',
+        'Confirma la instalacion.',
+      ],
+      openHelp:
+        'La app queda en tu pantalla de inicio o cajon de apps. Tambien puedes tocar Abrir en aplicacion si Chrome lo muestra arriba.',
+      manualButtonText: 'Ver pasos',
+      manualAction: 'dismiss',
+    };
+  }
+
+  return {
+    manualHelp: 'Si no aparece instalacion directa, usa Chrome o Edge.',
+    manualSteps: [
+      'Abre este link en Chrome o Edge.',
+      'Busca el icono de instalar en la barra superior.',
+      'Confirma la instalacion.',
+    ],
+    openHelp:
+      'Chrome o Edge pueden mostrar Abrir en aplicacion en la barra superior. Si no, busca Barber Studio entre tus aplicaciones.',
+    manualButtonText: 'Ver pasos',
+    manualAction: 'dismiss',
+  };
 }
 
 export function InstallAppPrompt() {
@@ -105,8 +190,9 @@ export function InstallAppPrompt() {
   const [installState, setInstallState] = useState<InstallState>('idle');
   const [progress, setProgress] = useState(0);
   const [showOpenHelp, setShowOpenHelp] = useState(false);
-  const installHelp = useMemo(() => getInstallHelp(), []);
-  const openInstalledHelp = useMemo(() => getOpenInstalledHelp(), []);
+  const [didCopyLink, setDidCopyLink] = useState(false);
+  const [didTryOpenChrome, setDidTryOpenChrome] = useState(false);
+  const installGuide = useMemo(() => getInstallGuide(), []);
 
   const completeAsInstalled = useCallback(() => {
     markInstalled();
@@ -121,6 +207,26 @@ export function InstallAppPrompt() {
     setProgress(100);
     setInstallState('manual');
     setIsVisible(true);
+  }, []);
+
+  const copyCurrentLink = useCallback(async () => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+    if (!navigator.clipboard?.writeText) return;
+
+    try {
+      await navigator.clipboard.writeText(getCurrentInstallUrl());
+      setDidCopyLink(true);
+    } catch {
+      setDidCopyLink(false);
+    }
+  }, []);
+
+  const openInChrome = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const targetUrl = getCurrentInstallUrl();
+    setDidTryOpenChrome(true);
+    window.location.href = getChromeIntentUrl(targetUrl);
   }, []);
 
   useEffect(() => {
@@ -171,6 +277,21 @@ export function InstallAppPrompt() {
   }, [installState]);
 
   const installApp = useCallback(async () => {
+    if (installState === 'manual') {
+      if (installGuide.manualAction === 'copyLink') {
+        void copyCurrentLink();
+      } else if (installGuide.manualAction === 'openChrome') {
+        if (didTryOpenChrome) {
+          void copyCurrentLink();
+        } else {
+          openInChrome();
+        }
+      } else {
+        setIsVisible(false);
+      }
+      return;
+    }
+
     if (installState === 'installed') {
       if (showOpenHelp) {
         setIsVisible(false);
@@ -206,7 +327,17 @@ export function InstallAppPrompt() {
     }
 
     showManualInstallHelp();
-  }, [completeAsInstalled, installPrompt, installState, showManualInstallHelp, showOpenHelp]);
+  }, [
+    completeAsInstalled,
+    copyCurrentLink,
+    installGuide.manualAction,
+    installPrompt,
+    installState,
+    didTryOpenChrome,
+    openInChrome,
+    showManualInstallHelp,
+    showOpenHelp,
+  ]);
 
   if (Platform.OS !== 'web' || isStandaloneDisplay() || !isVisible) {
     return null;
@@ -215,19 +346,30 @@ export function InstallAppPrompt() {
   const isBusy =
     installState === 'checking' || installState === 'prompting' || installState === 'installing';
   const isInstalledState = installState === 'installed';
+  const { isChromium } = getUserAgentFlags();
+  const wasOpenedForInstall =
+    typeof window !== 'undefined' && window.location.search.includes('pwaInstall=1') && isChromium;
   const title = isInstalledState ? 'Aplicacion instalada' : 'Instala Barber Studio';
   const iconName = isInstalledState ? 'checkmark-circle-outline' : 'download-outline';
   const iconColor = isInstalledState ? colors.gold : colors.black;
   const buttonText = isBusy
     ? 'Instalando...'
-    : isInstalledState
-      ? showOpenHelp
-        ? 'Entendido'
-        : 'Como abrirla'
-      : 'Instalar aplicacion';
+      : isInstalledState
+        ? showOpenHelp
+          ? 'Entendido'
+          : 'Como abrirla'
+        : installState === 'manual'
+          ? didCopyLink
+            ? 'Link copiado'
+            : didTryOpenChrome
+              ? 'Copiar link'
+            : installGuide.manualAction !== 'dismiss'
+              ? installGuide.manualButtonText
+              : 'Entendido'
+        : 'Instalar aplicacion';
   const helpText = isInstalledState
     ? showOpenHelp
-      ? openInstalledHelp
+      ? installGuide.openHelp
       : 'Listo. Se instalo correctamente. Puedes abrirla desde el icono instalado en tu dispositivo.'
     : installState === 'checking'
       ? 'Verificando si tu navegador permite instalacion directa...'
@@ -236,8 +378,14 @@ export function InstallAppPrompt() {
         : installState === 'installing'
           ? 'Instalando la app en tu dispositivo...'
           : installState === 'manual'
-            ? installHelp
-            : 'Toca el boton para instalarla o ver los pasos rapidos.';
+            ? didCopyLink
+              ? 'Listo. Ahora abre Chrome o Edge, pega el link y toca Instalar aplicacion.'
+              : didTryOpenChrome
+                ? 'Si Chrome no se abrio, es probable que no este instalado. Copia el link y abrelo en Chrome o Edge.'
+              : installGuide.manualHelp
+            : wasOpenedForInstall
+              ? 'Ya estas en un navegador compatible. Toca Instalar aplicacion para terminar.'
+              : 'Toca el boton para instalarla o ver los pasos rapidos.';
 
   return (
     <View style={[styles.container, isInstalledState && styles.containerSuccess]}>
@@ -247,6 +395,18 @@ export function InstallAppPrompt() {
         {progress > 0 ? (
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          </View>
+        ) : null}
+        {installState === 'manual' ? (
+          <View style={styles.steps}>
+            {installGuide.manualSteps.map((step, index) => (
+              <View key={step} style={styles.stepRow}>
+                <View style={styles.stepNumber}>
+                  <Text style={styles.stepNumberText}>{index + 1}</Text>
+                </View>
+                <Text style={styles.stepText}>{step}</Text>
+              </View>
+            ))}
           </View>
         ) : null}
       </View>
@@ -314,6 +474,33 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: radii.full,
     backgroundColor: colors.gold,
+  },
+  steps: {
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  stepNumber: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.full,
+    backgroundColor: colors.gold,
+  },
+  stepNumberText: {
+    color: colors.black,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  stepText: {
+    ...typography.bodySmall,
+    flex: 1,
+    color: colors.gray300,
   },
   installButton: {
     minHeight: 44,

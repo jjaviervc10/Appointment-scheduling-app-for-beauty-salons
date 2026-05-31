@@ -22,6 +22,17 @@ La app web de Jaquelina Lopez Barber Studio esta preparada para instalarse desde
 3. Si Chrome no muestra el prompt automatico, abrir el menu de tres puntos.
 4. Tocar `Instalar app` o `Agregar a pantalla principal`.
 
+### Firefox en Android
+
+Firefox no siempre permite disparar el instalador PWA desde un boton dentro de la pagina. En ese caso la landing muestra `Abrir en Chrome`:
+
+1. Tocar `Abrir en Chrome`.
+2. Cuando la pagina abra en Chrome, tocar `Instalar aplicacion`.
+3. Confirmar la instalacion.
+4. Si Chrome no se abre, tocar `Copiar link` y abrirlo manualmente en Chrome o Edge.
+
+El navegador no permite iniciar automaticamente la instalacion despues de cambiar de Firefox a Chrome; Chrome requiere una accion del usuario dentro de Chrome.
+
 ## Instalar en iPhone
 
 1. Abrir `https://barberjaquelinalopezstudio.netlify.app` en Safari.
@@ -33,6 +44,7 @@ La app web de Jaquelina Lopez Barber Studio esta preparada para instalarse desde
 
 - iPhone/Safari no dispara `beforeinstallprompt`; la instalacion siempre es manual desde compartir.
 - Chrome/Android puede retrasar u ocultar el prompt si el navegador aun no considera instalable la app.
+- Firefox no soporta el prompt automatico de instalacion igual que Chrome/Edge; se debe usar menu manual o abrir el link en un navegador Chromium.
 - Navegadores dentro de otras apps, como WebView o pestañas internas, pueden no permitir instalar.
 - El service worker no cachea `/api/*`, requests con `Authorization` ni fallback offline para rutas owner o miniapp.
 
