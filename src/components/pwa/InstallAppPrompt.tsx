@@ -8,14 +8,53 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 };
 
+type NavigatorWithInstallState = Navigator & {
+  getInstalledRelatedApps?: () => Promise<Array<{ id?: string; platform?: string; url?: string }>>;
+  standalone?: boolean;
+};
+
+const INSTALLED_STORAGE_KEY = 'jl-barber-pwa-installed';
+
+function wasMarkedInstalled() {
+  try {
+    return window.localStorage.getItem(INSTALLED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function markInstalled() {
+  try {
+    window.localStorage.setItem(INSTALLED_STORAGE_KEY, 'true');
+  } catch {
+    // Some browsers block localStorage in private modes.
+  }
+}
+
 function isStandaloneDisplay() {
   if (typeof window === 'undefined') return false;
 
-  const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean };
+  const navigatorWithStandalone = window.navigator as NavigatorWithInstallState;
   return (
     window.matchMedia?.('(display-mode: standalone)').matches ||
     navigatorWithStandalone.standalone === true
   );
+}
+
+async function isAppAlreadyInstalled() {
+  if (typeof window === 'undefined') return false;
+  if (isStandaloneDisplay()) return true;
+  if (wasMarkedInstalled()) return true;
+
+  const navigatorWithInstallState = window.navigator as NavigatorWithInstallState;
+  if (!navigatorWithInstallState.getInstalledRelatedApps) return false;
+
+  try {
+    const installedApps = await navigatorWithInstallState.getInstalledRelatedApps();
+    return installedApps.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function getInstallHelp() {
@@ -42,13 +81,19 @@ export function InstallAppPrompt() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [showManualHelp, setShowManualHelp] = useState(false);
   const installHelp = useMemo(() => getInstallHelp(), []);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return undefined;
 
-    setIsInstalled(isStandaloneDisplay());
-    setIsVisible(!isStandaloneDisplay());
+    let isActive = true;
+
+    void isAppAlreadyInstalled().then((installed) => {
+      if (!isActive) return;
+      setIsInstalled(installed);
+      setIsVisible(!installed);
+    });
 
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
@@ -58,6 +103,7 @@ export function InstallAppPrompt() {
 
     const handleAppInstalled = () => {
       setInstallPrompt(null);
+      markInstalled();
       setIsInstalled(true);
       setIsVisible(false);
     };
@@ -66,13 +112,17 @@ export function InstallAppPrompt() {
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
+      isActive = false;
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
   const installApp = useCallback(async () => {
-    if (!installPrompt) return;
+    if (!installPrompt) {
+      setShowManualHelp(true);
+      return;
+    }
 
     await installPrompt.prompt();
     await installPrompt.userChoice.catch(() => null);
@@ -90,24 +140,20 @@ export function InstallAppPrompt() {
         <Text style={styles.help}>
           {installPrompt
             ? 'Guarda esta agenda como app en tu dispositivo.'
-            : installHelp}
+            : showManualHelp
+              ? installHelp
+              : 'Toca el boton para instalarla o ver los pasos rapidos.'}
         </Text>
       </View>
 
-      {installPrompt ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={installApp}
-          style={({ pressed }) => [styles.installButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="download-outline" size={18} color={colors.black} />
-          <Text style={styles.installButtonText}>Instalar app</Text>
-        </Pressable>
-      ) : (
-        <View style={styles.helpBadge}>
-          <Ionicons name="phone-portrait-outline" size={18} color={colors.gold} />
-        </View>
-      )}
+      <Pressable
+        accessibilityRole="button"
+        onPress={installApp}
+        style={({ pressed }) => [styles.installButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="download-outline" size={18} color={colors.black} />
+        <Text style={styles.installButtonText}>Instalar aplicacion</Text>
+      </Pressable>
     </View>
   );
 }
@@ -116,6 +162,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: spacing.md,
     marginHorizontal: spacing.lg,
     marginTop: spacing.lg,
@@ -128,6 +175,7 @@ const styles = StyleSheet.create({
   },
   copy: {
     flex: 1,
+    minWidth: 220,
     gap: spacing.xxs,
   },
   title: {
@@ -152,16 +200,6 @@ const styles = StyleSheet.create({
   installButtonText: {
     ...typography.buttonSmall,
     color: colors.black,
-  },
-  helpBadge: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.gold,
-    borderRadius: radii.sm,
-    backgroundColor: colors.gold + '12',
   },
   pressed: {
     opacity: 0.8,
