@@ -1,19 +1,40 @@
 import { Tabs, useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
+import {
+  hasSessionExited,
+  markSessionExited,
+  neutralizePrivateHistoryEntry,
+} from '../../src/utils/sessionExit';
 
 function LogoutTabButton(props: any) {
   const router = useRouter();
+
+  const handleLogout = () => {
+    markSessionExited();
+    neutralizePrivateHistoryEntry();
+    router.replace('/');
+  };
+
   return (
     <TouchableOpacity
       {...props}
-      onPress={() => router.replace('/')}
+      onPress={handleLogout}
     />
   );
 }
 
 export default function ClientLayout() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (hasSessionExited()) {
+      router.replace('/');
+    }
+  }, [router]);
+
   return (
     <Tabs
       screenOptions={{

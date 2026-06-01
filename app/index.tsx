@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../src/theme';
 import { InstallAppPrompt } from '../src/components/pwa/InstallAppPrompt';
+import { clearSessionExit } from '../src/utils/sessionExit';
 
 const FEATURES = [
   { icon: 'calendar-outline' as const, title: 'Reserva fácil', desc: 'Elige día y hora\nen segundos' },
@@ -31,6 +32,11 @@ export default function SplashScreen() {
   const slideAnim = useRef(new Animated.Value(30)).current;
 
   const useNative = Platform.OS !== 'web';
+
+  const enterApp = (path: string) => {
+    clearSessionExit();
+    router.replace(path as any);
+  };
 
   useEffect(() => {
     Animated.parallel([
@@ -103,7 +109,7 @@ export default function SplashScreen() {
       <Animated.View style={[styles.buttonsContainer, { opacity: fadeAnim }]}>
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => router.replace('/(client)/home')}
+          onPress={() => enterApp('/(client)/home')}
           activeOpacity={0.8}
         >
           <Ionicons name="calendar" size={20} color={colors.black} />
@@ -113,7 +119,7 @@ export default function SplashScreen() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => router.replace('/(client)/booking')}
+          onPress={() => enterApp('/(client)/booking')}
           activeOpacity={0.8}
         >
           <Ionicons name="time-outline" size={20} color={colors.gold} />
@@ -124,7 +130,7 @@ export default function SplashScreen() {
         {/* Owner access — temporary until auth gate is implemented */}
         <TouchableOpacity
           style={styles.ownerButton}
-          onPress={() => router.replace('/(owner)/dashboard')}
+          onPress={() => enterApp('/(owner)/dashboard')}
           activeOpacity={0.8}
         >
           <Ionicons name="key-outline" size={16} color={colors.gray500} />

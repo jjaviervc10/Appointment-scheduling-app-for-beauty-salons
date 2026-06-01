@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Slot, useRouter, usePathname } from 'expo-router';
 import { AppLayout } from '../../src/components/layout/AppLayout';
 import type { SidebarRoute } from '../../src/components/layout/Sidebar';
+import {
+  hasSessionExited,
+  markSessionExited,
+  neutralizePrivateHistoryEntry,
+} from '../../src/utils/sessionExit';
 
 const ROUTE_MAP: Record<SidebarRoute, string> = {
   dashboard: '/(owner)/dashboard',
@@ -24,11 +29,19 @@ export default function OwnerLayout() {
   const pathname = usePathname();
   const activeRoute = getActiveRoute(pathname);
 
+  useEffect(() => {
+    if (hasSessionExited()) {
+      router.replace('/');
+    }
+  }, [router]);
+
   const handleNavigate = (route: SidebarRoute) => {
     router.push(ROUTE_MAP[route] as any);
   };
 
   const handleLogout = () => {
+    markSessionExited();
+    neutralizePrivateHistoryEntry();
     router.replace('/');
   };
 
