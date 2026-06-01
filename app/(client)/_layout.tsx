@@ -4,8 +4,8 @@ import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
 import {
+  exitToLandingOnWeb,
   hasSessionExited,
-  markSessionExited,
   neutralizePrivateHistoryEntry,
 } from '../../src/utils/sessionExit';
 
@@ -13,8 +13,7 @@ function LogoutTabButton(props: any) {
   const router = useRouter();
 
   const handleLogout = () => {
-    markSessionExited();
-    neutralizePrivateHistoryEntry();
+    if (exitToLandingOnWeb()) return;
     router.replace('/');
   };
 
@@ -31,12 +30,14 @@ export default function ClientLayout() {
 
   useEffect(() => {
     if (hasSessionExited()) {
+      neutralizePrivateHistoryEntry();
       router.replace('/');
     }
   }, [router]);
 
   return (
     <Tabs
+      backBehavior="none"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.gold,

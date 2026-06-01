@@ -43,5 +43,13 @@ export function neutralizePrivateHistoryEntry() {
   };
 
   window.history.replaceState(exitState, '', '/');
-  window.history.pushState(exitState, '', '/');
+}
+
+export function exitToLandingOnWeb() {
+  if (typeof window === 'undefined') return false;
+
+  markSessionExited();
+  neutralizePrivateHistoryEntry();
+  window.location.replace('/');
+  return true;
 }

@@ -3,8 +3,8 @@ import { Slot, useRouter, usePathname } from 'expo-router';
 import { AppLayout } from '../../src/components/layout/AppLayout';
 import type { SidebarRoute } from '../../src/components/layout/Sidebar';
 import {
+  exitToLandingOnWeb,
   hasSessionExited,
-  markSessionExited,
   neutralizePrivateHistoryEntry,
 } from '../../src/utils/sessionExit';
 
@@ -31,17 +31,17 @@ export default function OwnerLayout() {
 
   useEffect(() => {
     if (hasSessionExited()) {
+      neutralizePrivateHistoryEntry();
       router.replace('/');
     }
   }, [router]);
 
   const handleNavigate = (route: SidebarRoute) => {
-    router.push(ROUTE_MAP[route] as any);
+    router.replace(ROUTE_MAP[route] as any);
   };
 
   const handleLogout = () => {
-    markSessionExited();
-    neutralizePrivateHistoryEntry();
+    if (exitToLandingOnWeb()) return;
     router.replace('/');
   };
 
