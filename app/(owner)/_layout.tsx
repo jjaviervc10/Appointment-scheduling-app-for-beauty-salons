@@ -1,12 +1,10 @@
 import React, { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, usePathname } from 'expo-router';
 import { AppLayout } from '../../src/components/layout/AppLayout';
 import type { SidebarRoute } from '../../src/components/layout/Sidebar';
-import {
-  exitToLandingOnWeb,
-  hasSessionExited,
-  neutralizePrivateHistoryEntry,
-} from '../../src/utils/sessionExit';
+import { useAuthContext } from '../../src/contexts/AuthContext';
+import { colors } from '../../src/theme';
 
 const ROUTE_MAP: Record<SidebarRoute, string> = {
   dashboard: '/(owner)/dashboard',
@@ -27,23 +25,36 @@ function getActiveRoute(pathname: string): SidebarRoute {
 export default function OwnerLayout() {
   const router = useRouter();
   const pathname = usePathname();
+  const { ownerToken, ownerLoading, logoutOwner } = useAuthContext();
   const activeRoute = getActiveRoute(pathname);
 
   useEffect(() => {
-    if (hasSessionExited()) {
-      neutralizePrivateHistoryEntry();
-      router.replace('/');
+    if (ownerLoading) return;
+    if (!ownerToken) {
+      router.replace('/(auth)/login-owner' as any);
     }
-  }, [router]);
+  }, [ownerToken, ownerLoading, router]);
 
   const handleNavigate = (route: SidebarRoute) => {
     router.replace(ROUTE_MAP[route] as any);
   };
 
-  const handleLogout = () => {
-    if (exitToLandingOnWeb()) return;
-    router.replace('/');
+  const handleLogout = async () => {
+    await logoutOwner();
+    router.replace('/(auth)/login-owner' as any);
   };
+
+  // Show loading spinner while validating stored token
+  if (ownerLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
+        <ActivityIndicator color={colors.gold} />
+      </View>
+    );
+  }
+
+  // Redirect is in-flight — render nothing to avoid flicker
+  if (!ownerToken) return null;
 
   return (
     <AppLayout

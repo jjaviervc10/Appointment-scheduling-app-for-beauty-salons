@@ -38,6 +38,11 @@ export default function SplashScreen() {
     router.replace(path as any);
   };
 
+  const enterOwnerPanel = () => {
+    clearSessionExit();
+    router.replace('/(auth)/login-owner' as any);
+  };
+
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -127,10 +132,10 @@ export default function SplashScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.gold} />
         </TouchableOpacity>
 
-        {/* Owner access — temporary until auth gate is implemented */}
+        {/* Owner access */}
         <TouchableOpacity
           style={styles.ownerButton}
-          onPress={() => enterApp('/(owner)/dashboard')}
+          onPress={enterOwnerPanel}
           activeOpacity={0.8}
         >
           <Ionicons name="key-outline" size={16} color={colors.gray500} />

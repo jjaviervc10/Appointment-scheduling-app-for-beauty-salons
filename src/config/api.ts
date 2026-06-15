@@ -3,13 +3,11 @@ import Constants from 'expo-constants';
 declare const process: {
   env: {
     EXPO_PUBLIC_API_BASE_URL?: string;
-    EXPO_PUBLIC_OWNER_SECRET?: string;
   };
 };
 
 const BUILD_TIME_ENV = {
   EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL,
-  EXPO_PUBLIC_OWNER_SECRET: process.env.EXPO_PUBLIC_OWNER_SECRET,
 };
 
 function readEnvVar(name: string): string | undefined {
@@ -27,5 +25,6 @@ function readEnvVar(name: string): string | undefined {
   return undefined;
 }
 
-export const API_BASE_URL = readEnvVar('EXPO_PUBLIC_API_BASE_URL') ?? 'http://localhost:3000';
-export const OWNER_SECRET = readEnvVar('EXPO_PUBLIC_OWNER_SECRET');
+export const API_BASE_URL =
+  readEnvVar('EXPO_PUBLIC_API_BASE_URL') ??
+  'https://striking-caring-production.up.railway.app';

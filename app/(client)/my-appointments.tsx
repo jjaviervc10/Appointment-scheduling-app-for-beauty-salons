@@ -1,17 +1,41 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { colors, spacing, typography, radii } from '../../src/theme';
 import { AppointmentCard } from '../../src/components/appointments/AppointmentCard';
 import { EmptyState } from '../../src/components/ui/EmptyState';
 import { LoadingState } from '../../src/components/ui/LoadingState';
 import { useUpcomingAppointments } from '../../src/hooks/useAppointments';
+import { useAuthContext } from '../../src/contexts/AuthContext';
+import { isHttpError } from '../../src/types/api';
 
 export default function MyAppointmentsScreen() {
-  const { data: appointments, loading } = useUpcomingAppointments();
+  const router = useRouter();
+  const { clientToken, clientLoading, logoutClient } = useAuthContext();
+  const {
+    data: appointments,
+    loading,
+    error,
+  } = useUpcomingAppointments(Boolean(clientToken) && !clientLoading);
+
+  // Gate: require client session to see personal appointments
+  useEffect(() => {
+    if (clientLoading) return;
+    if (!clientToken) {
+      router.replace('/(auth)/login-client' as any);
+    }
+  }, [clientToken, clientLoading, router]);
+
+  useEffect(() => {
+    if (!isHttpError(error) || error.status !== 401) return;
+
+    void logoutClient().finally(() => {
+      router.replace('/(auth)/login-client' as any);
+    });
+  }, [error, logoutClient, router]);
 
   const nextAppointment = appointments[0];
-  const restAppointments = appointments.slice(1);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>

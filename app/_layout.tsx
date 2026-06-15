@@ -6,6 +6,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../src/theme';
 import { ensurePwaHeadLinks, registerServiceWorker } from '../src/utils/registerServiceWorker';
+import { AuthProvider } from '../src/contexts/AuthContext';
 
 type FontLoadState = 'loading' | 'ready' | 'error';
 
@@ -86,7 +87,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <AuthProvider>
       <Head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#D4AF37" />
@@ -104,7 +105,7 @@ export default function RootLayout() {
           animation: 'slide_from_right',
         }}
       />
-    </>
+    </AuthProvider>
   );
 }
 

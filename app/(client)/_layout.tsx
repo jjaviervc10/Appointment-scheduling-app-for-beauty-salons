@@ -3,17 +3,14 @@ import { useEffect } from 'react';
 import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
-import {
-  exitToLandingOnWeb,
-  hasSessionExited,
-  neutralizePrivateHistoryEntry,
-} from '../../src/utils/sessionExit';
+import { useAuthContext } from '../../src/contexts/AuthContext';
 
 function LogoutTabButton(props: any) {
   const router = useRouter();
+  const { logoutClient } = useAuthContext();
 
-  const handleLogout = () => {
-    if (exitToLandingOnWeb()) return;
+  const handleLogout = async () => {
+    await logoutClient();
     router.replace('/');
   };
 
@@ -27,13 +24,15 @@ function LogoutTabButton(props: any) {
 
 export default function ClientLayout() {
   const router = useRouter();
+  const { clientToken, clientLoading } = useAuthContext();
 
+  // Redirect "Mis citas" to client login if not authenticated.
+  // Public tabs (home, booking) remain accessible without login.
+  // The redirect is handled per-screen for my-appointments,
+  // so the layout itself doesn't gate all tabs.
   useEffect(() => {
-    if (hasSessionExited()) {
-      neutralizePrivateHistoryEntry();
-      router.replace('/');
-    }
-  }, [router]);
+    // No global redirect here — public tabs must stay accessible.
+  }, [clientToken, clientLoading, router]);
 
   return (
     <Tabs

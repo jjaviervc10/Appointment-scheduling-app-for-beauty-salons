@@ -1,5 +1,6 @@
 import type { AppointmentViewModel } from '../types/models';
 import type { AppointmentStatus } from '../types/enums';
+import { API_BASE_URL } from '../config/api';
 import { createPublicBookingRequest } from './bookingApi';
 import {
   approveOwnerAppointment,
@@ -12,7 +13,24 @@ import {
   rejectOwnerAppointment,
 } from './ownerApi';
 import type { OwnerAppointmentRow } from '../types/api';
+import { HttpError } from '../types/api';
 import { formatLocalDateKey } from '../utils/date';
+import { getClientToken } from '../utils/tokenStorage';
+
+interface ClientAppointmentRow {
+  id: string;
+  startAt: string;
+  endAt: string;
+  status: AppointmentStatus;
+  serviceName: string;
+  staffName: string;
+  businessName: string;
+}
+
+interface ClientAppointmentsResponse {
+  ok: true;
+  appointments: ClientAppointmentRow[];
+}
 
 function mapOwnerRowToViewModel(row: OwnerAppointmentRow): AppointmentViewModel {
   const startAt = new Date(row.requested_start_at);
@@ -69,7 +87,52 @@ export async function fetchAwaitingAppointments(): Promise<AppointmentViewModel[
 }
 
 export async function fetchUpcomingAppointments(): Promise<AppointmentViewModel[]> {
-  throw new Error('No backend endpoint connected for client upcoming appointments.');
+  const token = await getClientToken();
+  if (!token) {
+    throw new HttpError(401, 'No hay sesión activa. Inicia sesión para continuar.');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/auth/client/my-appointments`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  const body = await response.json().catch(() => ({})) as Partial<ClientAppointmentsResponse> & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new HttpError(
+      response.status,
+      body.error ?? 'No se pudieron cargar tus citas.',
+    );
+  }
+
+  return (body.appointments ?? []).map(mapClientAppointmentToViewModel);
+}
+
+function mapClientAppointmentToViewModel(row: ClientAppointmentRow): AppointmentViewModel {
+  const startAt = new Date(row.startAt);
+  const endAt = new Date(row.endAt);
+  const durationMs = endAt.getTime() - startAt.getTime();
+  const durationMinutes = Number.isFinite(durationMs)
+    ? Math.max(15, Math.round(durationMs / 60000))
+    : 15;
+
+  return {
+    id: row.id,
+    clientName: '',
+    clientPhone: '',
+    serviceName: row.serviceName,
+    durationMinutes,
+    status: row.status,
+    startAt,
+    endAt,
+    notes: null,
+  };
 }
 
 export async function updateAppointmentStatus(

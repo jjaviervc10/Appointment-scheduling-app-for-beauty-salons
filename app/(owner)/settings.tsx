@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
+import { PasskeySection } from '../../src/components/auth/PasskeySection';
 import { getOwnerSettings, updateOwnerSettings } from '../../src/services/ownerApi';
 import { isHttpError } from '../../src/types/api';
 
@@ -240,6 +241,11 @@ export default function SettingsScreen() {
           <Text style={styles.infoText}>
             Los cambios se aplican inmediatamente. La configuración de notificaciones requiere que el servicio de WhatsApp esté activo.
           </Text>
+        </View>
+
+        {/* Passkey / biometric access */}
+        <View style={styles.sectionCard}>
+          <PasskeySection />
         </View>
       </ScrollView>
       )}

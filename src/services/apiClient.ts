@@ -1,6 +1,7 @@
-import { API_BASE_URL, OWNER_SECRET } from '../config/api';
+import { API_BASE_URL } from '../config/api';
 import type { ApiErrorBody } from '../types/api';
 import { HttpError } from '../types/api';
+import { getOwnerToken } from '../utils/tokenStorage';
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -10,6 +11,33 @@ interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 10000;
+
+// ── Global 401 handler ────────────────────────────────────────
+// Registered by AuthContext so it can clear the session when the
+// owner token is rejected by the backend.
+let onUnauthorizedCallback: (() => void) | null = null;
+
+export function setOnUnauthorized(callback: () => void): void {
+  onUnauthorizedCallback = callback;
+}
+
+async function buildHeaders(
+  requiresOwnerAuth: boolean,
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (requiresOwnerAuth) {
+    const token = await getOwnerToken();
+    if (!token) {
+      throw new HttpError(401, 'No hay sesión activa. Inicia sesión para continuar.');
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
+}
 
 function logApiError(params: {
   path: string;
@@ -39,7 +67,6 @@ function logApiError(params: {
     url: `${API_BASE_URL}${params.path}`,
     method: params.method,
     requiresOwnerAuth: params.requiresOwnerAuth,
-    ownerSecretConfigured: Boolean(OWNER_SECRET),
     body: params.body,
     error: errorInfo,
   });
@@ -68,21 +95,6 @@ function mapStatusToMessage(status: number): string {
   }
 }
 
-function buildHeaders(requiresOwnerAuth: boolean): HeadersInit {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (requiresOwnerAuth) {
-    if (!OWNER_SECRET) {
-      throw new HttpError(401, 'OWNER_SECRET no configurado en variables de entorno.');
-    }
-    headers.Authorization = `Bearer ${OWNER_SECRET}`;
-  }
-
-  return headers;
-}
-
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const {
     method = 'GET',
@@ -100,14 +112,13 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     url: requestUrl,
     method,
     requiresOwnerAuth,
-    ownerSecretConfigured: Boolean(OWNER_SECRET),
     body,
   });
 
   try {
     const response = await fetch(requestUrl, {
       method,
-      headers: buildHeaders(requiresOwnerAuth),
+      headers: await buildHeaders(requiresOwnerAuth),
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
@@ -125,7 +136,14 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     if (!response.ok) {
       const errorPayload = (payload ?? {}) as ApiErrorBody;
       const message = errorPayload.error ?? mapStatusToMessage(response.status);
-      throw new HttpError(response.status, message, errorPayload.details);
+      const httpError = new HttpError(response.status, message, errorPayload.details);
+
+      // Notify auth context so it can clear the session and redirect to login
+      if (response.status === 401 && requiresOwnerAuth && onUnauthorizedCallback) {
+        onUnauthorizedCallback();
+      }
+
+      throw httpError;
     }
 
     console.info('[API RESPONSE]', {

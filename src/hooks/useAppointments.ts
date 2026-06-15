@@ -34,18 +34,33 @@ export function usePendingAppointments() {
   return { data, loading, refetch };
 }
 
-export function useUpcomingAppointments() {
+export function useUpcomingAppointments(enabled = true) {
   const [data, setData] = useState<AppointmentViewModel[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
+  const [error, setError] = useState<unknown>(null);
 
   const refetch = useCallback(async () => {
+    if (!enabled) {
+      setData([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    setError(null);
     setLoading(true);
-    const result = await fetchUpcomingAppointments();
-    setData(result);
-    setLoading(false);
-  }, []);
+    try {
+      const result = await fetchUpcomingAppointments();
+      setData(result);
+    } catch (err) {
+      setData([]);
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled]);
 
   useEffect(() => { refetch(); }, [refetch]);
 
-  return { data, loading, refetch };
+  return { data, loading, error, refetch };
 }
