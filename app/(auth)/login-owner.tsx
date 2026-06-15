@@ -1,8 +1,6 @@
 /**
- * Owner login screen.
- * Supports:
- *   - Phone + password login
- *   - Passkey / biometric login (web only, when passkeys exist)
+ * Owner access screen.
+ * The backend decides whether first-time password setup is required.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -24,43 +22,76 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radii, spacing, typography } from '../../src/theme';
 import { useAuthContext } from '../../src/contexts/AuthContext';
 import { useWebAuthn } from '../../src/hooks/useWebAuthn';
+import {
+  getOwnerSetupStatus,
+  requestOwnerSetup,
+  verifyOwnerSetup,
+} from '../../src/services/authApi';
 import { clearSessionExit } from '../../src/utils/sessionExit';
+
+type OwnerAccessMode = 'loading' | 'error' | 'setup' | 'login';
+type SetupStep = 'phone' | 'verify';
+
+function getStatus(error: unknown): number | undefined {
+  return (error as { status?: number } | null)?.status;
+}
 
 export default function OwnerLoginScreen() {
   const router = useRouter();
   const { loginOwner, setOwnerSession } = useAuthContext();
   const webAuthn = useWebAuthn();
 
+  const [mode, setMode] = useState<OwnerAccessMode>('loading');
+  const [setupStep, setSetupStep] = useState<SetupStep>('phone');
   const [phone, setPhone] = useState('');
+  const [setupPhone, setSetupPhone] = useState('');
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkedPasskeys, setCheckedPasskeys] = useState(false);
 
-  // ── Check if any passkeys exist (probe login/options endpoint) ──
+  const loadSetupStatus = useCallback(async () => {
+    setMode('loading');
+    setError(null);
+
+    try {
+      const response = await getOwnerSetupStatus();
+      setMode(response.setupRequired ? 'setup' : 'login');
+      setSetupStep('phone');
+    } catch {
+      setMode('error');
+      setError('No se pudo consultar el estado de acceso. Revisa tu conexion e intenta de nuevo.');
+    }
+  }, []);
 
   useEffect(() => {
+    void loadSetupStatus();
+  }, [loadSetupStatus]);
+
+  useEffect(() => {
+    if (mode !== 'login') return;
+
     if (webAuthn.isSupported) {
       webAuthn.checkPasskeys().finally(() => setCheckedPasskeys(true));
     } else {
       setCheckedPasskeys(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [webAuthn.isSupported]);
-
-  // ── Password login ──────────────────────────────────────────
+  }, [mode, webAuthn.isSupported]);
 
   const handleLogin = useCallback(async () => {
     const phoneVal = phone.trim();
     const passwordVal = password;
 
     if (!phoneVal || !passwordVal) {
-      setError('Ingresa tu teléfono y contraseña.');
+      setError('Ingresa tu telefono y contrasena.');
       return;
     }
 
-    setIsLoading(true);
+    setIsSubmitting(true);
     setError(null);
 
     try {
@@ -68,19 +99,98 @@ export default function OwnerLoginScreen() {
       clearSessionExit();
       router.replace('/(owner)/dashboard');
     } catch (err: unknown) {
-      const e = err as { status?: number };
-      if (e.status === 429) {
-        setError('Demasiados intentos. Espera unos minutos antes de volver a intentarlo.');
+      const status = getStatus(err);
+      if (status === 400) {
+        setError('Revisa los datos ingresados.');
+      } else if (status === 429) {
+        setError('Demasiados intentos. Espera antes de reintentar.');
       } else {
-        // 401, 400, network — always show the same generic message (anti-enumeration)
-        setError('Credenciales inválidas.');
+        setError('Telefono o contrasena invalidos.');
       }
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   }, [phone, password, loginOwner, router]);
 
-  // ── Passkey login ────────────────────────────────────────────
+  const handleSetupRequest = useCallback(async () => {
+    const phoneVal = phone.trim();
+
+    if (!phoneVal) {
+      setError('Ingresa tu telefono.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      await requestOwnerSetup(phoneVal);
+      setSetupPhone(phoneVal);
+      setSetupStep('verify');
+      setCode('');
+      setPassword('');
+      setConfirmPassword('');
+    } catch (err: unknown) {
+      const status = getStatus(err);
+      if (status === 409) {
+        setError('La configuracion inicial ya fue completada.');
+        setMode('login');
+      } else if (status === 429) {
+        setError('Demasiados intentos. Espera unos minutos.');
+      } else {
+        setError('Revisa los datos ingresados.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [phone]);
+
+  const handleSetupVerify = useCallback(async () => {
+    const codeVal = code.trim();
+    const passwordVal = password;
+
+    if (!/^\d{6}$/.test(codeVal)) {
+      setError('El codigo debe tener exactamente 6 digitos.');
+      return;
+    }
+
+    if (passwordVal.length < 8) {
+      setError('La contrasena debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (passwordVal !== confirmPassword) {
+      setError('La confirmacion de contrasena no coincide.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const session = await verifyOwnerSetup(setupPhone, codeVal, passwordVal);
+      await setOwnerSession(session.token, session.owner);
+      clearSessionExit();
+      router.replace('/(owner)/dashboard');
+    } catch (err: unknown) {
+      const status = getStatus(err);
+      if (status === 400) {
+        setError('Revisa los datos ingresados.');
+      } else if (status === 401) {
+        setError('Codigo invalido o expirado.');
+      } else if (status === 409) {
+        setError('La configuracion inicial ya fue completada.');
+        setMode('login');
+        setSetupStep('phone');
+      } else if (status === 429) {
+        setError('Demasiados intentos. Espera unos minutos.');
+      } else {
+        setError('No se pudo completar la configuracion. Intenta de nuevo.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [code, password, confirmPassword, setupPhone, setOwnerSession, router]);
 
   const handlePasskeyLogin = useCallback(async () => {
     setError(null);
@@ -90,18 +200,25 @@ export default function OwnerLoginScreen() {
       clearSessionExit();
       router.replace('/(owner)/dashboard');
     } catch {
-      // error already set inside useWebAuthn
+      // Error is shown by useWebAuthn.
     }
   }, [webAuthn, setOwnerSession, router]);
 
-  // ── Computed state ───────────────────────────────────────────
+  const goBackToSetupPhone = useCallback(() => {
+    setSetupStep('phone');
+    setCode('');
+    setPassword('');
+    setConfirmPassword('');
+    setError(null);
+  }, []);
 
   const showPasskeyButton =
-    checkedPasskeys && webAuthn.isSupported && webAuthn.hasPasskeys === true;
+    mode === 'login' &&
+    checkedPasskeys &&
+    webAuthn.isSupported &&
+    webAuthn.hasPasskeys === true;
 
-  const displayError = error ?? webAuthn.error;
-
-  // ── Render ───────────────────────────────────────────────────
+  const displayError = error ?? (mode === 'login' ? webAuthn.error : null);
 
   return (
     <KeyboardAvoidingView
@@ -114,147 +231,193 @@ export default function OwnerLoginScreen() {
         keyboardShouldPersistTaps="handled"
         bounces={false}
       >
-        {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.iconCircle}>
-            <Ionicons name="key-outline" size={36} color={colors.gold} />
+            <Ionicons name={mode === 'setup' ? 'shield-checkmark-outline' : 'key-outline'} size={36} color={colors.gold} />
           </View>
-          <Text style={styles.title}>Panel del estudio</Text>
-          <Text style={styles.subtitle}>Acceso exclusivo para el propietario</Text>
+          <Text style={styles.title}>
+            {mode === 'setup' ? 'Configurar acceso de duena' : 'Panel del estudio'}
+          </Text>
+          <Text style={styles.subtitle}>
+            {mode === 'setup'
+              ? 'Crea tu contrasena con verificacion por WhatsApp'
+              : 'Acceso exclusivo para la propietaria'}
+          </Text>
         </View>
 
-        {/* ── Form ── */}
-        <View style={styles.form}>
-
-          {/* Phone field */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Teléfono</Text>
-            <View style={styles.inputRow}>
-              <Ionicons
-                name="call-outline"
-                size={18}
-                color={colors.gray600}
-                style={styles.inputIcon}
-              />
-              <TextInput
-                style={styles.input}
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="6143278357"
-                placeholderTextColor={colors.gray700}
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                returnKeyType="next"
-                editable={!isLoading}
-                accessible
-                accessibilityLabel="Teléfono del propietario"
-              />
-            </View>
+        {mode === 'loading' ? (
+          <View style={styles.stateBox}>
+            <ActivityIndicator size="small" color={colors.gold} />
+            <Text style={styles.stateText}>Consultando estado de acceso...</Text>
           </View>
-
-          {/* Password field */}
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Contraseña</Text>
-            <View style={styles.inputRow}>
-              <Ionicons
-                name="lock-closed-outline"
-                size={18}
-                color={colors.gray600}
-                style={styles.inputIcon}
-              />
-              <TextInput
-                style={[styles.input, styles.inputFlex]}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                placeholderTextColor={colors.gray700}
-                secureTextEntry={!showPassword}
-                autoComplete="current-password"
-                returnKeyType="done"
-                onSubmitEditing={handleLogin}
-                editable={!isLoading}
-                accessible
-                accessibilityLabel="Contraseña"
-              />
-              <Pressable
-                onPress={() => setShowPassword((v) => !v)}
-                style={styles.eyeButton}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-              >
-                <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={18}
-                  color={colors.gray500}
-                />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Error message */}
-          {displayError ? (
+        ) : mode === 'error' ? (
+          <View style={styles.form}>
             <View style={styles.errorBox}>
-              <Ionicons
-                name="alert-circle-outline"
-                size={16}
-                color={colors.error}
-              />
+              <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
               <Text style={styles.errorText}>{displayError}</Text>
             </View>
-          ) : null}
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={loadSetupStatus}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Reintentar"
+            >
+              <Text style={styles.loginButtonText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.form}>
+            {mode === 'setup' && setupStep === 'verify' ? (
+              <>
+                <View style={styles.infoBox}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.info} />
+                  <Text style={styles.infoText}>
+                    Enviamos un codigo por WhatsApp al telefono indicado.
+                  </Text>
+                </View>
 
-          {/* Login button */}
-          <TouchableOpacity
-            style={[styles.loginButton, isLoading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Iniciar sesión"
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color={colors.black} />
+                <Field
+                  icon="keypad-outline"
+                  label="Codigo de 6 digitos"
+                  value={code}
+                  onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  keyboardType="number-pad"
+                  editable={!isSubmitting}
+                  onSubmitEditing={handleSetupVerify}
+                />
+
+                <PasswordField
+                  label="Nueva contrasena"
+                  value={password}
+                  onChangeText={setPassword}
+                  showPassword={showPassword}
+                  onTogglePassword={() => setShowPassword((value) => !value)}
+                  editable={!isSubmitting}
+                />
+
+                <PasswordField
+                  label="Confirmar contrasena"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  showPassword={showPassword}
+                  onTogglePassword={() => setShowPassword((value) => !value)}
+                  editable={!isSubmitting}
+                  onSubmitEditing={handleSetupVerify}
+                />
+              </>
             ) : (
-              <Text style={styles.loginButtonText}>Iniciar sesión</Text>
+              <>
+                <Field
+                  icon="call-outline"
+                  label="Telefono"
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="6143278357"
+                  keyboardType="phone-pad"
+                  editable={!isSubmitting}
+                  onSubmitEditing={mode === 'setup' ? handleSetupRequest : undefined}
+                  accessibilityLabel="Telefono de la propietaria"
+                />
+
+                {mode === 'login' ? (
+                  <PasswordField
+                    label="Contrasena"
+                    value={password}
+                    onChangeText={setPassword}
+                    showPassword={showPassword}
+                    onTogglePassword={() => setShowPassword((value) => !value)}
+                    editable={!isSubmitting}
+                    onSubmitEditing={handleLogin}
+                  />
+                ) : null}
+              </>
             )}
-          </TouchableOpacity>
 
-          {/* Passkey button — only shown when supported + passkeys exist */}
-          {showPasskeyButton ? (
-            <>
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>o</Text>
-                <View style={styles.dividerLine} />
+            {displayError ? (
+              <View style={styles.errorBox}>
+                <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
+                <Text style={styles.errorText}>{displayError}</Text>
               </View>
+            ) : null}
 
+            <TouchableOpacity
+              style={[styles.loginButton, isSubmitting && styles.buttonDisabled]}
+              onPress={
+                mode === 'setup'
+                  ? setupStep === 'phone'
+                    ? handleSetupRequest
+                    : handleSetupVerify
+                  : handleLogin
+              }
+              disabled={isSubmitting}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={
+                mode === 'setup'
+                  ? setupStep === 'phone'
+                    ? 'Enviar codigo'
+                    : 'Configurar acceso'
+                  : 'Iniciar sesion'
+              }
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color={colors.black} />
+              ) : (
+                <Text style={styles.loginButtonText}>
+                  {mode === 'setup'
+                    ? setupStep === 'phone'
+                      ? 'Enviar codigo'
+                      : 'Configurar acceso'
+                    : 'Iniciar sesion'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {mode === 'setup' && setupStep === 'verify' ? (
               <TouchableOpacity
-                style={[
-                  styles.passkeyButton,
-                  webAuthn.isLoading && styles.buttonDisabled,
-                ]}
-                onPress={handlePasskeyLogin}
-                disabled={webAuthn.isLoading}
-                activeOpacity={0.8}
+                style={styles.backLink}
+                onPress={goBackToSetupPhone}
                 accessibilityRole="button"
-                accessibilityLabel="Entrar con huella o Face ID"
+                accessibilityLabel="Volver a telefono"
+                disabled={isSubmitting}
               >
-                {webAuthn.isLoading ? (
-                  <ActivityIndicator size="small" color={colors.gold} />
-                ) : (
-                  <>
-                    <Ionicons name="finger-print" size={22} color={colors.gold} />
-                    <Text style={styles.passkeyButtonText}>
-                      Entrar con huella / Face ID
-                    </Text>
-                  </>
-                )}
+                <Ionicons name="arrow-back-outline" size={16} color={colors.gray500} />
+                <Text style={styles.backLinkText}>Volver al telefono</Text>
               </TouchableOpacity>
-            </>
-          ) : null}
-        </View>
+            ) : null}
 
-        {/* ── Back link ── */}
+            {showPasskeyButton ? (
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>o</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.passkeyButton, webAuthn.isLoading && styles.buttonDisabled]}
+                  onPress={handlePasskeyLogin}
+                  disabled={webAuthn.isLoading}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Entrar con huella o Face ID"
+                >
+                  {webAuthn.isLoading ? (
+                    <ActivityIndicator size="small" color={colors.gold} />
+                  ) : (
+                    <>
+                      <Ionicons name="finger-print" size={22} color={colors.gold} />
+                      <Text style={styles.passkeyButtonText}>Entrar con huella / Face ID</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        )}
+
         <TouchableOpacity
           style={styles.backLink}
           onPress={() => router.replace('/')}
@@ -269,24 +432,120 @@ export default function OwnerLoginScreen() {
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────
+interface FieldProps {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  keyboardType?: 'default' | 'phone-pad' | 'number-pad';
+  editable: boolean;
+  onSubmitEditing?: () => void;
+  accessibilityLabel?: string;
+}
+
+function Field({
+  icon,
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType = 'default',
+  editable,
+  onSubmitEditing,
+  accessibilityLabel,
+}: FieldProps) {
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.inputRow}>
+        <Ionicons name={icon} size={18} color={colors.gray600} style={styles.inputIcon} />
+        <TextInput
+          style={styles.input}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.gray700}
+          keyboardType={keyboardType}
+          autoComplete={keyboardType === 'phone-pad' ? 'tel' : 'off'}
+          returnKeyType="done"
+          onSubmitEditing={onSubmitEditing}
+          editable={editable}
+          accessible
+          accessibilityLabel={accessibilityLabel ?? label}
+        />
+      </View>
+    </View>
+  );
+}
+
+interface PasswordFieldProps {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  showPassword: boolean;
+  onTogglePassword: () => void;
+  editable: boolean;
+  onSubmitEditing?: () => void;
+}
+
+function PasswordField({
+  label,
+  value,
+  onChangeText,
+  showPassword,
+  onTogglePassword,
+  editable,
+  onSubmitEditing,
+}: PasswordFieldProps) {
+  return (
+    <View style={styles.fieldGroup}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.inputRow}>
+        <Ionicons name="lock-closed-outline" size={18} color={colors.gray600} style={styles.inputIcon} />
+        <TextInput
+          style={[styles.input, styles.inputFlex]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder="********"
+          placeholderTextColor={colors.gray700}
+          secureTextEntry={!showPassword}
+          autoComplete="current-password"
+          returnKeyType="done"
+          onSubmitEditing={onSubmitEditing}
+          editable={editable}
+          accessible
+          accessibilityLabel={label}
+        />
+        <Pressable
+          onPress={onTogglePassword}
+          style={styles.eyeButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityLabel={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+        >
+          <Ionicons
+            name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+            size={18}
+            color={colors.gray500}
+          />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-
   container: {
     flex: 1,
     backgroundColor: colors.black,
   },
-
   content: {
     flexGrow: 1,
     justifyContent: 'center',
     padding: spacing.xl,
     gap: spacing.xl,
   },
-
-  // Header
   header: {
     alignItems: 'center',
     gap: spacing.sm,
@@ -310,8 +569,17 @@ const styles = StyleSheet.create({
     color: colors.gray500,
     textAlign: 'center',
   },
-
-  // Form
+  stateBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.xl,
+  },
+  stateText: {
+    ...typography.bodySmall,
+    color: colors.gray400,
+    textAlign: 'center',
+  },
   form: {
     gap: spacing.md,
   },
@@ -348,8 +616,20 @@ const styles = StyleSheet.create({
   eyeButton: {
     padding: spacing.xs,
   },
-
-  // Error
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.infoLight,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.info,
+    lineHeight: 18,
+  },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -364,8 +644,6 @@ const styles = StyleSheet.create({
     color: colors.error,
     lineHeight: 18,
   },
-
-  // Login button
   loginButton: {
     height: 52,
     backgroundColor: colors.gold,
@@ -382,8 +660,6 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.5,
   },
-
-  // Divider
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -398,8 +674,6 @@ const styles = StyleSheet.create({
     color: colors.gray600,
     fontSize: 12,
   },
-
-  // Passkey button
   passkeyButton: {
     height: 52,
     flexDirection: 'row',
@@ -416,8 +690,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-
-  // Back link
   backLink: {
     flexDirection: 'row',
     alignItems: 'center',

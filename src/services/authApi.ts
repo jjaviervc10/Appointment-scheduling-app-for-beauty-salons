@@ -9,7 +9,8 @@ import { API_BASE_URL } from '../config/api';
 // ── Response types ─────────────────────────────────────────────
 
 export interface OwnerProfile {
-  id: string;
+  id?: string;
+  identityId?: string;
   phone: string;
   role: string;
   createdAt?: string;
@@ -41,6 +42,11 @@ export interface PasskeyCredential {
   deviceName: string;
   createdAt: string;
   lastUsedAt: string | null;
+}
+
+export interface OwnerSetupStatusResponse {
+  ok: true;
+  setupRequired: boolean;
 }
 
 // ── Internal fetch helper ──────────────────────────────────────
@@ -78,6 +84,28 @@ export async function loginOwner(
   return authFetch<OwnerLoginResponse>('/api/auth/owner/login', {
     method: 'POST',
     body: JSON.stringify({ phone, password }),
+  });
+}
+
+export async function getOwnerSetupStatus(): Promise<OwnerSetupStatusResponse> {
+  return authFetch<OwnerSetupStatusResponse>('/api/auth/owner/setup-status');
+}
+
+export async function requestOwnerSetup(phone: string): Promise<void> {
+  await authFetch('/api/auth/owner/setup/request', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+export async function verifyOwnerSetup(
+  phone: string,
+  code: string,
+  password: string,
+): Promise<OwnerLoginResponse> {
+  return authFetch<OwnerLoginResponse>('/api/auth/owner/setup/verify', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code, password }),
   });
 }
 
