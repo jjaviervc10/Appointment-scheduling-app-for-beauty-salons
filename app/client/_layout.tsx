@@ -46,7 +46,11 @@ export default function ClientLayout() {
   }
 
   if (requiresClientSession && authStatus !== 'client') {
-    return null;
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
+        <ActivityIndicator color={colors.gold} />
+      </View>
+    );
   }
 
   return (

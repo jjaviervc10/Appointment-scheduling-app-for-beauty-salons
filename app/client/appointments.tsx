@@ -40,7 +40,7 @@ export default function MyAppointmentsScreen() {
   }
 
   if (authStatus !== 'client') {
-    return null;
+    return <LoadingState />;
   }
 
   const nextAppointment = appointments[0];

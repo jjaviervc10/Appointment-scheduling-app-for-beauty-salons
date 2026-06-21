@@ -130,7 +130,7 @@ export default function SplashScreen() {
       <Animated.View style={[styles.buttonsContainer, { opacity: fadeAnim }]}>
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => enterApp('/client/home')}
+          onPress={() => enterApp('/access?intent=booking')}
           activeOpacity={0.8}
         >
           <Ionicons name="calendar" size={20} color={colors.black} />
@@ -140,7 +140,7 @@ export default function SplashScreen() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => enterApp('/client/booking')}
+          onPress={() => enterApp('/client/booking?mode=availability')}
           activeOpacity={0.8}
         >
           <Ionicons name="time-outline" size={20} color={colors.gold} />

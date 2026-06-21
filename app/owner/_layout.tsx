@@ -60,12 +60,14 @@ export default function OwnerLayout() {
     );
   }
 
-  // Redirect is in-flight — render nothing to avoid flicker
-  if (isLoginRoute) {
-    return null;
+  // Keep a visible transition state while protected-route redirects resolve.
+  if (isLoginRoute || authStatus !== 'owner') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
+        <ActivityIndicator color={colors.gold} />
+      </View>
+    );
   }
-
-  if (authStatus !== 'owner') return null;
 
   return (
     <AppLayout

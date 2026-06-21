@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing, typography, radii, shadows } from '../../src/theme';
 import { MOCK_APPOINTMENTS, MOCK_TIME_BLOCKS } from '../../src/services/mock-data';
 import { BookingWizardModal, type BookingSubmitInput } from '../../src/components/modals/BookingWizardModal';
@@ -20,6 +21,7 @@ import type { TimeSlot } from '../../src/types/models';
 import { createPublicBookingRequest, getPublicAvailability, getPublicServices } from '../../src/services/bookingApi';
 import type { PublicAvailabilityResponse } from '../../src/types/api';
 import { formatLocalDateKey } from '../../src/utils/date';
+import { useAuthContext } from '../../src/contexts/AuthContext';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -30,8 +32,6 @@ const fmt = (d: Date) => formatLocalDateKey(d);
 const WORK_START = 9;
 const WORK_END = 18;
 const SLOT_DURATION = 45;
-const MAIN_APP_CLIENT_FULL_NAME = '[APP] Cliente principal';
-const MAIN_APP_CLIENT_PHONE = '+526140000000';
 const MONTHS_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 
 type ViewMode = 'mes' | 'semana' | 'dia';
@@ -123,6 +123,10 @@ function apiSlotToTimeSlot(slot: { slotStartAt: string; slotEndAt: string }): im
 
 // ── component ────────────────────────────────────────────────────
 export default function BookingScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const { authStatus, clientProfile } = useAuthContext();
+  const isAvailabilityOnly = params.mode === 'availability';
   const todayStr = fmt(new Date());
   const todayObj = new Date();
   const [viewMode, setViewMode] = useState<ViewMode>('mes');
@@ -223,20 +227,29 @@ export default function BookingScreen() {
   }, []);
 
   const handleSlotSelect = (slot: TimeSlot) => {
+    if (isAvailabilityOnly) return;
+    if (authStatus !== 'client') {
+      router.push('/access?intent=booking');
+      return;
+    }
     setSelectedSlot(slot);
     setShowWizard(true);
   };
 
   const handleBookingSubmit = useCallback(async (input: BookingSubmitInput) => {
+    if (authStatus !== 'client' || !clientProfile?.phone) {
+      throw new Error('Inicia sesión para solicitar la cita.');
+    }
+
     await createPublicBookingRequest({
-      fullName: MAIN_APP_CLIENT_FULL_NAME,
-      phone: MAIN_APP_CLIENT_PHONE,
+      fullName: clientProfile.fullName?.trim() || 'Cliente verificado',
+      phone: clientProfile.phone,
       serviceId: input.serviceId,
       startAt: input.startAt,
       notes: input.notes,
       token: undefined,
     });
-  }, []);
+  }, [authStatus, clientProfile]);
 
   const capMonth = (m: number) => MONTHS_ES[m].charAt(0).toUpperCase() + MONTHS_ES[m].slice(1);
 
@@ -247,11 +260,30 @@ export default function BookingScreen() {
         <Image source={require('../../assets/LogoJL.png')} style={styles.headerLogo} resizeMode="contain" />
         <View style={styles.headerTextBlock}>
           <Text style={styles.headerTitle}>Reservar cita</Text>
-          <Text style={styles.headerSubtitle}>Busca disponibilidad y agenda</Text>
+          <Text style={styles.headerSubtitle}>
+            {isAvailabilityOnly ? 'Consulta horarios disponibles' : 'Busca disponibilidad y agenda'}
+          </Text>
         </View>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {isAvailabilityOnly ? (
+          <View style={styles.availabilityNotice}>
+            <Ionicons name="eye-outline" size={19} color={colors.gold} />
+            <View style={styles.availabilityNoticeText}>
+              <Text style={styles.availabilityNoticeTitle}>Modo consulta</Text>
+              <Text style={styles.availabilityNoticeBody}>
+                Puedes revisar fechas y horarios sin iniciar sesión.
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/access?intent=booking')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.availabilityNoticeAction}>Reservar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         {/* ── Search / filter chips ── */}
         <View style={styles.searchCard}>
           <View style={styles.searchHeader}>
@@ -605,6 +637,20 @@ const styles = StyleSheet.create({
   headerTextBlock: { flex: 1 },
   headerTitle: { ...typography.h2, color: colors.white },
   headerSubtitle: { ...typography.bodySmall, color: colors.gray500, marginTop: spacing.xxs },
+  availabilityNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.gold + '55',
+    backgroundColor: colors.gold + '10',
+  },
+  availabilityNoticeText: { flex: 1 },
+  availabilityNoticeTitle: { ...typography.subtitle, color: colors.white, fontSize: 14 },
+  availabilityNoticeBody: { ...typography.bodySmall, color: colors.gray400, marginTop: 2 },
+  availabilityNoticeAction: { ...typography.buttonSmall, color: colors.gold },
   scrollView: {
     flex: 1, backgroundColor: colors.black,
     borderTopLeftRadius: radii.xl, borderTopRightRadius: radii.xl,

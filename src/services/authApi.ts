@@ -27,6 +27,7 @@ export interface ClientProfile {
   identityId: string;
   phone: string;
   clientId: string | null;
+  fullName?: string | null;
 }
 
 export interface ClientLoginResponse {
