@@ -109,11 +109,14 @@ export default function ClientLayout() {
         name="logout"
         options={{
           title: 'Salir',
-          href: authStatus === 'client' && clientToken ? undefined : null,
           tabBarIcon: ({ size }) => (
             <Ionicons name="log-out-outline" size={size} color={colors.error} />
           ),
           tabBarLabelStyle: { ...typography.tabLabel, color: colors.error },
+          tabBarItemStyle:
+            authStatus === 'client' && clientToken
+              ? undefined
+              : { display: 'none' },
           tabBarButton: (props) => <LogoutTabButton {...props} />,
         }}
       />
