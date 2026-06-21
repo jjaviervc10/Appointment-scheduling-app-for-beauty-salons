@@ -7,11 +7,11 @@ import { useAuthContext } from '../../src/contexts/AuthContext';
 import { colors } from '../../src/theme';
 
 const ROUTE_MAP: Record<SidebarRoute, string> = {
-  dashboard: '/(owner)/dashboard',
-  agenda: '/(owner)/agenda',
-  clients: '/(owner)/clients',
-  messages: '/(owner)/messages',
-  settings: '/(owner)/settings',
+  dashboard: '/owner/dashboard',
+  agenda: '/owner/agenda',
+  clients: '/owner/clients',
+  messages: '/owner/messages',
+  settings: '/owner/settings',
 };
 
 function getActiveRoute(pathname: string): SidebarRoute {
@@ -25,15 +25,22 @@ function getActiveRoute(pathname: string): SidebarRoute {
 export default function OwnerLayout() {
   const router = useRouter();
   const pathname = usePathname();
-  const { ownerToken, ownerLoading, logoutOwner } = useAuthContext();
+  const { authStatus, logoutOwner } = useAuthContext();
   const activeRoute = getActiveRoute(pathname);
+  const isLoginRoute = pathname === '/owner/login';
 
   useEffect(() => {
-    if (ownerLoading) return;
-    if (!ownerToken) {
-      router.replace('/(auth)/login-owner' as any);
+    if (authStatus === 'loading') return;
+
+    if (authStatus !== 'owner') {
+      router.replace('/access');
+      return;
     }
-  }, [ownerToken, ownerLoading, router]);
+
+    if (isLoginRoute) {
+      router.replace('/owner/dashboard');
+    }
+  }, [authStatus, isLoginRoute, router]);
 
   const handleNavigate = (route: SidebarRoute) => {
     router.replace(ROUTE_MAP[route] as any);
@@ -41,11 +48,11 @@ export default function OwnerLayout() {
 
   const handleLogout = async () => {
     await logoutOwner();
-    router.replace('/(auth)/login-owner' as any);
+    router.replace('/access');
   };
 
   // Show loading spinner while validating stored token
-  if (ownerLoading) {
+  if (authStatus === 'loading') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
         <ActivityIndicator color={colors.gold} />
@@ -54,7 +61,11 @@ export default function OwnerLayout() {
   }
 
   // Redirect is in-flight — render nothing to avoid flicker
-  if (!ownerToken) return null;
+  if (isLoginRoute) {
+    return null;
+  }
+
+  if (authStatus !== 'owner') return null;
 
   return (
     <AppLayout

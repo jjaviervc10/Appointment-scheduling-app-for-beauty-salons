@@ -86,7 +86,7 @@ export default function ClientLoginScreen() {
     try {
       await verifyOtp(phoneSentTo, codeVal);
       clearSessionExit();
-      router.replace('/(client)/my-appointments');
+      router.replace('/client/appointments');
     } catch (err: unknown) {
       const e = err as { status?: number };
       if (e.status === 429) {

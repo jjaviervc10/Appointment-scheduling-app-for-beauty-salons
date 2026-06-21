@@ -1,7 +1,7 @@
 import type { AppointmentViewModel } from '../types/models';
 import type { AppointmentStatus } from '../types/enums';
-import { API_BASE_URL } from '../config/api';
 import { createPublicBookingRequest } from './bookingApi';
+import { apiRequest } from './apiClient';
 import {
   approveOwnerAppointment,
   cancelOwnerAppointment,
@@ -13,9 +13,7 @@ import {
   rejectOwnerAppointment,
 } from './ownerApi';
 import type { OwnerAppointmentRow } from '../types/api';
-import { HttpError } from '../types/api';
 import { formatLocalDateKey } from '../utils/date';
-import { getClientToken } from '../utils/tokenStorage';
 
 interface ClientAppointmentRow {
   id: string;
@@ -87,31 +85,12 @@ export async function fetchAwaitingAppointments(): Promise<AppointmentViewModel[
 }
 
 export async function fetchUpcomingAppointments(): Promise<AppointmentViewModel[]> {
-  const token = await getClientToken();
-  if (!token) {
-    throw new HttpError(401, 'No hay sesión activa. Inicia sesión para continuar.');
-  }
+  const response = await apiRequest<ClientAppointmentsResponse>(
+    '/api/auth/client/my-appointments',
+    { auth: 'client' },
+  );
 
-  const response = await fetch(`${API_BASE_URL}/api/auth/client/my-appointments`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  const body = await response.json().catch(() => ({})) as Partial<ClientAppointmentsResponse> & {
-    error?: string;
-  };
-
-  if (!response.ok) {
-    throw new HttpError(
-      response.status,
-      body.error ?? 'No se pudieron cargar tus citas.',
-    );
-  }
-
-  return (body.appointments ?? []).map(mapClientAppointmentToViewModel);
+  return response.appointments.map(mapClientAppointmentToViewModel);
 }
 
 function mapClientAppointmentToViewModel(row: ClientAppointmentRow): AppointmentViewModel {

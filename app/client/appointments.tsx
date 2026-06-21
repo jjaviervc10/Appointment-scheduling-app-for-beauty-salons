@@ -12,28 +12,36 @@ import { isHttpError } from '../../src/types/api';
 
 export default function MyAppointmentsScreen() {
   const router = useRouter();
-  const { clientToken, clientLoading, logoutClient } = useAuthContext();
+  const { authStatus, logoutClient } = useAuthContext();
   const {
     data: appointments,
     loading,
     error,
-  } = useUpcomingAppointments(Boolean(clientToken) && !clientLoading);
+  } = useUpcomingAppointments(authStatus === 'client');
 
   // Gate: require client session to see personal appointments
   useEffect(() => {
-    if (clientLoading) return;
-    if (!clientToken) {
-      router.replace('/(auth)/login-client' as any);
+    if (authStatus === 'loading') return;
+    if (authStatus !== 'client') {
+      router.replace('/access');
     }
-  }, [clientToken, clientLoading, router]);
+  }, [authStatus, router]);
 
   useEffect(() => {
     if (!isHttpError(error) || error.status !== 401) return;
 
     void logoutClient().finally(() => {
-      router.replace('/(auth)/login-client' as any);
+      router.replace('/access');
     });
   }, [error, logoutClient, router]);
+
+  if (authStatus === 'loading') {
+    return <LoadingState />;
+  }
+
+  if (authStatus !== 'client') {
+    return null;
+  }
 
   const nextAppointment = appointments[0];
 

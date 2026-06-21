@@ -1,6 +1,6 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, usePathname, useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { TouchableOpacity } from 'react-native';
+import { ActivityIndicator, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography } from '../../src/theme';
 import { useAuthContext } from '../../src/contexts/AuthContext';
@@ -24,15 +24,30 @@ function LogoutTabButton(props: any) {
 
 export default function ClientLayout() {
   const router = useRouter();
-  const { clientToken, clientLoading } = useAuthContext();
+  const pathname = usePathname();
+  const { authStatus, clientToken } = useAuthContext();
+  const requiresClientSession =
+    pathname === '/client/appointments' ||
+    pathname === '/client/profile';
 
-  // Redirect "Mis citas" to client login if not authenticated.
-  // Public tabs (home, booking) remain accessible without login.
-  // The redirect is handled per-screen for my-appointments,
-  // so the layout itself doesn't gate all tabs.
   useEffect(() => {
-    // No global redirect here — public tabs must stay accessible.
-  }, [clientToken, clientLoading, router]);
+    if (!requiresClientSession || authStatus === 'loading') return;
+    if (authStatus !== 'client') {
+      router.replace('/access');
+    }
+  }, [authStatus, requiresClientSession, router]);
+
+  if (requiresClientSession && authStatus === 'loading') {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
+        <ActivityIndicator color={colors.gold} />
+      </View>
+    );
+  }
+
+  if (requiresClientSession && authStatus !== 'client') {
+    return null;
+  }
 
   return (
     <Tabs
@@ -72,7 +87,7 @@ export default function ClientLayout() {
         }}
       />
       <Tabs.Screen
-        name="my-appointments"
+        name="appointments"
         options={{
           title: 'Mis citas',
           tabBarIcon: ({ color, size }) => (
@@ -81,9 +96,16 @@ export default function ClientLayout() {
         }}
       />
       <Tabs.Screen
+        name="login"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="logout"
         options={{
           title: 'Salir',
+          href: authStatus === 'client' && clientToken ? undefined : null,
           tabBarIcon: ({ size }) => (
             <Ionicons name="log-out-outline" size={size} color={colors.error} />
           ),

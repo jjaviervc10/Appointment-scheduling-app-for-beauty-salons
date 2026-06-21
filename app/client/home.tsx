@@ -130,7 +130,7 @@ export default function ClientHomeScreen() {
         {/* Quick booking CTA */}
         <TouchableOpacity
           style={styles.ctaCard}
-          onPress={() => router.push('/(client)/booking')}
+          onPress={() => router.push('/client/booking')}
           activeOpacity={0.85}
         >
           <Text style={styles.ctaTitle}>Reservar cita</Text>

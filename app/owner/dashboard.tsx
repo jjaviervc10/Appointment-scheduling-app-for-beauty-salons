@@ -549,8 +549,8 @@ export default function DashboardScreen() {
         <QuickActionsBar
           onNewAppointment={() => setShowNewAppt(true)}
           onBlockTime={() => setShowBlockTime(true)}
-          onSearchClient={() => router.push('/(owner)/clients' as any)}
-          onSendMessage={() => router.push('/(owner)/messages' as any)}
+          onSearchClient={() => router.push('/owner/clients')}
+          onSendMessage={() => router.push('/owner/messages')}
         />
       </View>
 

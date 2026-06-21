@@ -885,7 +885,7 @@ export default function MessagesScreen() {
                       <TouchableOpacity
                         style={styles.sheetBtnSecondary}
                         activeOpacity={0.8}
-                        onPress={() => { setSelectedMsg(null); router.push('/(owner)/agenda'); }}
+                        onPress={() => { setSelectedMsg(null); router.push('/owner/agenda'); }}
                       >
                         <Ionicons name="calendar-outline" size={16} color={colors.gold} />
                         <Text style={styles.sheetBtnSecondaryText}>Ir a Agenda</Text>

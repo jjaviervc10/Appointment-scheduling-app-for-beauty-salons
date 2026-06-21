@@ -9,12 +9,14 @@ import {
   Image,
   ScrollView,
   ImageStyle,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../src/theme';
 import { InstallAppPrompt } from '../src/components/pwa/InstallAppPrompt';
 import { clearSessionExit } from '../src/utils/sessionExit';
+import { useAuthContext } from '../src/contexts/AuthContext';
 
 const FEATURES = [
   { icon: 'calendar-outline' as const, title: 'Reserva fácil', desc: 'Elige día y hora\nen segundos' },
@@ -28,6 +30,7 @@ const FEATURES = [
  */
 export default function SplashScreen() {
   const router = useRouter();
+  const { authStatus } = useAuthContext();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
@@ -38,12 +41,17 @@ export default function SplashScreen() {
     router.replace(path as any);
   };
 
-  const enterOwnerPanel = () => {
-    clearSessionExit();
-    router.replace('/(auth)/login-owner' as any);
-  };
+  useEffect(() => {
+    if (authStatus === 'owner') {
+      router.replace('/owner/dashboard');
+    } else if (authStatus === 'client') {
+      router.replace('/client/appointments');
+    }
+  }, [authStatus, router]);
 
   useEffect(() => {
+    if (authStatus !== 'anonymous') return;
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -56,7 +64,15 @@ export default function SplashScreen() {
         useNativeDriver: useNative,
       }),
     ]).start();
-  }, [fadeAnim, slideAnim, useNative]);
+  }, [authStatus, fadeAnim, slideAnim, useNative]);
+
+  if (authStatus !== 'anonymous') {
+    return (
+      <View style={styles.sessionLoading}>
+        <ActivityIndicator color={colors.gold} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} bounces={false}>
@@ -114,7 +130,7 @@ export default function SplashScreen() {
       <Animated.View style={[styles.buttonsContainer, { opacity: fadeAnim }]}>
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => enterApp('/(client)/home')}
+          onPress={() => enterApp('/client/home')}
           activeOpacity={0.8}
         >
           <Ionicons name="calendar" size={20} color={colors.black} />
@@ -124,7 +140,7 @@ export default function SplashScreen() {
 
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => enterApp('/(client)/booking')}
+          onPress={() => enterApp('/client/booking')}
           activeOpacity={0.8}
         >
           <Ionicons name="time-outline" size={20} color={colors.gold} />
@@ -132,14 +148,14 @@ export default function SplashScreen() {
           <Ionicons name="chevron-forward" size={20} color={colors.gold} />
         </TouchableOpacity>
 
-        {/* Owner access */}
         <TouchableOpacity
-          style={styles.ownerButton}
-          onPress={enterOwnerPanel}
+          style={styles.secondaryButton}
+          onPress={() => enterApp('/access')}
           activeOpacity={0.8}
         >
-          <Ionicons name="key-outline" size={16} color={colors.gray500} />
-          <Text style={styles.ownerButtonText}>Acceso propietario</Text>
+          <Ionicons name="person-circle-outline" size={20} color={colors.gold} />
+          <Text style={styles.secondaryButtonText}>Acceder a mi cuenta</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.gold} />
         </TouchableOpacity>
 
       </Animated.View>
@@ -157,6 +173,12 @@ export default function SplashScreen() {
 }
 
 const styles = StyleSheet.create({
+  sessionLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.black,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.black,
@@ -317,19 +339,4 @@ const styles = StyleSheet.create({
   trustTextBlock: { flex: 1 },
   trustTitle: { ...typography.subtitle, color: colors.white, fontSize: 14 },
   trustDesc: { ...typography.caption, color: colors.gray500, marginTop: 2 },
-
-  // Owner access button (temporary, pre-auth)
-  ownerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  ownerButtonText: {
-    ...typography.caption,
-    color: colors.gray500,
-    textDecorationLine: 'underline',
-  },
 });

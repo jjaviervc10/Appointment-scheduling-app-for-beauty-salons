@@ -29,7 +29,11 @@ interface UseWebAuthnReturn {
   checkPasskeys: () => Promise<boolean>;
   loadPasskeys: (token: string) => Promise<void>;
   registerPasskey: (token: string, deviceName?: string) => Promise<void>;
-  loginWithPasskey: () => Promise<{ token: string; owner: OwnerProfile }>;
+  loginWithPasskey: () => Promise<{
+    token: string;
+    expiresAt: string;
+    owner: OwnerProfile;
+  }>;
   revokePasskey: (token: string, passkeyId: string) => Promise<void>;
   clearError: () => void;
 }
@@ -131,6 +135,7 @@ export function useWebAuthn(): UseWebAuthnReturn {
    */
   const loginWithPasskey = useCallback(async (): Promise<{
     token: string;
+    expiresAt: string;
     owner: OwnerProfile;
   }> => {
     if (!isSupported) {
@@ -145,7 +150,11 @@ export function useWebAuthn(): UseWebAuthnReturn {
         optionsJSON: optionsRes.options as unknown as Parameters<typeof startAuthentication>[0]['optionsJSON'],
       });
       const session = await verifyWebAuthnLogin(authResponse);
-      return { token: session.token, owner: session.owner };
+      return {
+        token: session.token,
+        expiresAt: session.expiresAt,
+        owner: session.owner,
+      };
     } catch (err: unknown) {
       const domErr = err as { name?: string; status?: number; message?: string };
       if (domErr.name === 'NotAllowedError') {

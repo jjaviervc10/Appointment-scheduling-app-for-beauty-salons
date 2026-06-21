@@ -97,7 +97,7 @@ export default function OwnerLoginScreen() {
     try {
       await loginOwner(phoneVal, passwordVal);
       clearSessionExit();
-      router.replace('/(owner)/dashboard');
+      router.replace('/owner/dashboard');
     } catch (err: unknown) {
       const status = getStatus(err);
       if (status === 400) {
@@ -169,9 +169,9 @@ export default function OwnerLoginScreen() {
 
     try {
       const session = await verifyOwnerSetup(setupPhone, codeVal, passwordVal);
-      await setOwnerSession(session.token, session.owner);
+      await setOwnerSession(session.token, session.owner, session.expiresAt);
       clearSessionExit();
-      router.replace('/(owner)/dashboard');
+      router.replace('/owner/dashboard');
     } catch (err: unknown) {
       const status = getStatus(err);
       if (status === 400) {
@@ -196,9 +196,9 @@ export default function OwnerLoginScreen() {
     setError(null);
     try {
       const session = await webAuthn.loginWithPasskey();
-      await setOwnerSession(session.token, session.owner);
+      await setOwnerSession(session.token, session.owner, session.expiresAt);
       clearSessionExit();
-      router.replace('/(owner)/dashboard');
+      router.replace('/owner/dashboard');
     } catch {
       // Error is shown by useWebAuthn.
     }

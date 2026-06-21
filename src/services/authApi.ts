@@ -1,18 +1,18 @@
 /**
- * Authentication API service.
- * Uses direct fetch (not apiRequest) to avoid circular dependencies
- * and because auth endpoints manage their own tokens.
+ * Authentication API contracts.
+ * All requests use the shared transport so timeouts, auth headers and errors
+ * behave consistently across owner and client flows.
  */
 
-import { API_BASE_URL } from '../config/api';
+import { apiRequest } from './apiClient';
 
-// ── Response types ─────────────────────────────────────────────
+export type AuthNextStep = 'client_otp' | 'owner_password' | 'owner_setup';
 
 export interface OwnerProfile {
   id?: string;
   identityId?: string;
-  phone: string;
-  role: string;
+  phone?: string;
+  role?: string;
   createdAt?: string;
 }
 
@@ -24,7 +24,6 @@ export interface OwnerLoginResponse {
 }
 
 export interface ClientProfile {
-  sessionId: string;
   identityId: string;
   phone: string;
   clientId: string | null;
@@ -49,168 +48,159 @@ export interface OwnerSetupStatusResponse {
   setupRequired: boolean;
 }
 
-// ── Internal fetch helper ──────────────────────────────────────
-
-async function authFetch<T>(
-  path: string,
-  options: RequestInit = {},
-  token?: string,
-): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
-  const body = await res.json().catch(() => ({})) as Record<string, unknown>;
-
-  if (!res.ok) {
-    const err = Object.assign(
-      new Error((body.error as string | undefined) ?? 'Error desconocido'),
-      { status: res.status },
-    );
-    throw err;
-  }
-
-  return body as T;
+export interface AuthNextStepResponse {
+  ok: true;
+  nextStep: AuthNextStep;
 }
 
-// ── Owner auth ─────────────────────────────────────────────────
-
-export async function loginOwner(
-  phone: string,
-  password: string,
-): Promise<OwnerLoginResponse> {
-  return authFetch<OwnerLoginResponse>('/api/auth/owner/login', {
+export function getAuthNextStep(phone: string): Promise<AuthNextStepResponse> {
+  return apiRequest<AuthNextStepResponse>('/api/auth/next-step', {
     method: 'POST',
-    body: JSON.stringify({ phone, password }),
+    auth: 'none',
+    body: { phone },
   });
 }
 
-export async function getOwnerSetupStatus(): Promise<OwnerSetupStatusResponse> {
-  return authFetch<OwnerSetupStatusResponse>('/api/auth/owner/setup-status');
+export function loginOwner(
+  phone: string,
+  password: string,
+): Promise<OwnerLoginResponse> {
+  return apiRequest<OwnerLoginResponse>('/api/auth/owner/login', {
+    method: 'POST',
+    auth: 'none',
+    body: { phone, password },
+  });
+}
+
+export function getOwnerSetupStatus(): Promise<OwnerSetupStatusResponse> {
+  return apiRequest<OwnerSetupStatusResponse>('/api/auth/owner/setup-status', {
+    auth: 'none',
+  });
 }
 
 export async function requestOwnerSetup(phone: string): Promise<void> {
-  await authFetch('/api/auth/owner/setup/request', {
+  await apiRequest('/api/auth/owner/setup/request', {
     method: 'POST',
-    body: JSON.stringify({ phone }),
+    auth: 'none',
+    body: { phone },
   });
 }
 
-export async function verifyOwnerSetup(
+export function verifyOwnerSetup(
   phone: string,
   code: string,
   password: string,
 ): Promise<OwnerLoginResponse> {
-  return authFetch<OwnerLoginResponse>('/api/auth/owner/setup/verify', {
+  return apiRequest<OwnerLoginResponse>('/api/auth/owner/setup/verify', {
     method: 'POST',
-    body: JSON.stringify({ phone, code, password }),
+    auth: 'none',
+    body: { phone, code, password },
   });
 }
 
-export async function logoutOwner(token: string): Promise<void> {
-  await authFetch('/api/auth/owner/logout', { method: 'POST' }, token);
+export async function logoutOwner(_token?: string): Promise<void> {
+  await apiRequest('/api/auth/owner/logout', {
+    method: 'POST',
+    auth: 'owner',
+  });
 }
 
-export async function getOwnerMe(
-  token: string,
+export function getOwnerMe(
+  _token?: string,
 ): Promise<{ ok: true; owner: OwnerProfile }> {
-  return authFetch('/api/auth/owner/me', {}, token);
+  return apiRequest('/api/auth/owner/me', { auth: 'owner' });
 }
-
-// ── Client auth (OTP via WhatsApp) ────────────────────────────
 
 export async function requestOtp(phone: string): Promise<void> {
-  await authFetch('/api/auth/client/request-otp', {
+  await apiRequest('/api/auth/client/request-otp', {
     method: 'POST',
-    body: JSON.stringify({ phone }),
+    auth: 'none',
+    body: { phone },
   });
 }
 
-export async function verifyOtp(
+export function verifyOtp(
   phone: string,
   code: string,
 ): Promise<ClientLoginResponse> {
-  return authFetch<ClientLoginResponse>('/api/auth/client/verify-otp', {
+  return apiRequest<ClientLoginResponse>('/api/auth/client/verify-otp', {
     method: 'POST',
-    body: JSON.stringify({ phone, code }),
+    auth: 'none',
+    body: { phone, code },
   });
 }
 
-export async function logoutClient(token: string): Promise<void> {
-  await authFetch('/api/auth/client/logout', { method: 'POST' }, token);
+export async function logoutClient(_token?: string): Promise<void> {
+  await apiRequest('/api/auth/client/logout', {
+    method: 'POST',
+    auth: 'client',
+  });
 }
 
-export async function getClientMe(
-  token: string,
-): Promise<{ ok: true; session: ClientProfile }> {
-  return authFetch('/api/auth/client/me', {}, token);
+export function getClientMe(
+  _token?: string,
+): Promise<{ ok: true; identity: ClientProfile }> {
+  return apiRequest('/api/auth/client/me', { auth: 'client' });
 }
 
-// ── WebAuthn / Passkeys (owner, web-only) ─────────────────────
-
-export async function getWebAuthnRegisterOptions(
-  token: string,
+export function getWebAuthnRegisterOptions(
+  _token: string,
   deviceName?: string,
 ): Promise<{ ok: true; options: Record<string, unknown> }> {
-  return authFetch(
-    '/api/auth/owner/webauthn/register/options',
-    {
-      method: 'POST',
-      body: JSON.stringify({ deviceName: deviceName ?? 'Mi dispositivo' }),
-    },
-    token,
-  );
+  return apiRequest('/api/auth/owner/webauthn/register/options', {
+    method: 'POST',
+    auth: 'owner',
+    body: { deviceName: deviceName ?? 'Mi dispositivo' },
+  });
 }
 
-export async function verifyWebAuthnRegistration(
-  token: string,
+export function verifyWebAuthnRegistration(
+  _token: string,
   response: unknown,
   deviceName?: string,
 ): Promise<{ ok: true; passkey: PasskeyCredential }> {
-  return authFetch(
-    '/api/auth/owner/webauthn/register/verify',
-    {
-      method: 'POST',
-      body: JSON.stringify({ response, deviceName: deviceName ?? 'Mi dispositivo' }),
-    },
-    token,
-  );
-}
-
-export async function getWebAuthnLoginOptions(): Promise<{
-  ok: true;
-  options: Record<string, unknown>;
-}> {
-  return authFetch('/api/auth/owner/webauthn/login/options', {
+  return apiRequest('/api/auth/owner/webauthn/register/verify', {
     method: 'POST',
-    body: JSON.stringify({}),
+    auth: 'owner',
+    body: { response, deviceName: deviceName ?? 'Mi dispositivo' },
   });
 }
 
-export async function verifyWebAuthnLogin(
-  response: unknown,
-): Promise<OwnerLoginResponse> {
-  return authFetch<OwnerLoginResponse>(
-    '/api/auth/owner/webauthn/login/verify',
-    { method: 'POST', body: JSON.stringify({ response }) },
-  );
+export function getWebAuthnLoginOptions(): Promise<{
+  ok: true;
+  options: Record<string, unknown>;
+}> {
+  return apiRequest('/api/auth/owner/webauthn/login/options', {
+    method: 'POST',
+    auth: 'none',
+    body: {},
+  });
 }
 
-export async function listPasskeys(
-  token: string,
+export function verifyWebAuthnLogin(
+  response: unknown,
+): Promise<OwnerLoginResponse> {
+  return apiRequest('/api/auth/owner/webauthn/login/verify', {
+    method: 'POST',
+    auth: 'none',
+    body: { response },
+  });
+}
+
+export function listPasskeys(
+  _token: string,
 ): Promise<{ ok: true; passkeys: PasskeyCredential[] }> {
-  return authFetch('/api/auth/owner/webauthn/passkeys', {}, token);
+  return apiRequest('/api/auth/owner/webauthn/passkeys', {
+    auth: 'owner',
+  });
 }
 
 export async function deletePasskey(
-  token: string,
+  _token: string,
   passkeyId: string,
 ): Promise<void> {
-  await authFetch(
-    `/api/auth/owner/webauthn/passkeys/${passkeyId}`,
-    { method: 'DELETE' },
-    token,
-  );
+  await apiRequest(`/api/auth/owner/webauthn/passkeys/${passkeyId}`, {
+    method: 'DELETE',
+    auth: 'owner',
+  });
 }
