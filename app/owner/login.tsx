@@ -16,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radii, spacing, typography } from '../../src/theme';
@@ -38,12 +38,15 @@ function getStatus(error: unknown): number | undefined {
 
 export default function OwnerLoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ phone?: string }>();
   const { loginOwner, setOwnerSession } = useAuthContext();
   const webAuthn = useWebAuthn();
 
   const [mode, setMode] = useState<OwnerAccessMode>('loading');
   const [setupStep, setSetupStep] = useState<SetupStep>('phone');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(() =>
+    typeof params.phone === 'string' ? params.phone.replace(/\D/g, '').slice(-10) : '',
+  );
   const [setupPhone, setSetupPhone] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');

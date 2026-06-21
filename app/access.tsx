@@ -15,22 +15,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuthContext } from '../src/contexts/AuthContext';
-import {
-  getAuthNextStep,
-  requestOwnerSetup,
-  verifyOwnerSetup,
-} from '../src/services/authApi';
-import { useWebAuthn } from '../src/hooks/useWebAuthn';
+import { getAuthNextStep } from '../src/services/authApi';
 import { isHttpError } from '../src/types/api';
 import { colors, radii, spacing, typography } from '../src/theme';
-import { clearSessionExit } from '../src/utils/sessionExit';
 
 type AccessState =
   | 'phone'
   | 'resolving_next_step'
-  | 'client_otp'
-  | 'owner_password'
-  | 'owner_setup'
   | 'error';
 
 function getResolutionError(error: unknown): string {
@@ -60,22 +51,9 @@ function normalizeMexicanPhoneInput(rawValue: string): string {
 export default function AccessScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ intent?: string }>();
-  const {
-    authStatus,
-    loginOwner,
-    requestOtp,
-    verifyOtp,
-    setOwnerSession,
-  } = useAuthContext();
-  const webAuthn = useWebAuthn();
+  const { authStatus } = useAuthContext();
   const [accessState, setAccessState] = useState<AccessState>('phone');
   const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [checkedPasskeys, setCheckedPasskeys] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const phoneInputRef = useRef<TextInput>(null);
   const clientDestination = params.intent === 'booking'
@@ -90,33 +68,11 @@ export default function AccessScreen() {
     }
   }, [authStatus, clientDestination, router]);
 
-  useEffect(() => {
-    if (accessState !== 'owner_password') {
-      setCheckedPasskeys(false);
-      return;
-    }
-
-    if (!webAuthn.isSupported) {
-      setCheckedPasskeys(true);
-      return;
-    }
-
-    void webAuthn.checkPasskeys().finally(() => setCheckedPasskeys(true));
-  }, [accessState, webAuthn.checkPasskeys, webAuthn.isSupported]);
-
-  const clearCredentials = useCallback(() => {
-    setOtp('');
-    setPassword('');
-    setConfirmPassword('');
-    setShowPassword(false);
-    setError(null);
-  }, []);
-
   const changePhone = useCallback(() => {
-    clearCredentials();
+    setError(null);
     setAccessState('phone');
     setTimeout(() => phoneInputRef.current?.focus(), 100);
-  }, [clearCredentials]);
+  }, []);
 
   const handleContinue = useCallback(async () => {
     const normalizedInput = normalizeMexicanPhoneInput(phone);
@@ -127,112 +83,32 @@ export default function AccessScreen() {
     }
 
     setPhone(normalizedInput);
-    clearCredentials();
+    setError(null);
     setAccessState('resolving_next_step');
 
     try {
       const response = await getAuthNextStep(normalizedInput);
-      if (response.nextStep === 'client_otp') {
-        await requestOtp(normalizedInput);
-      } else if (response.nextStep === 'owner_setup') {
-        await requestOwnerSetup(normalizedInput);
+
+      if (response.nextStep === 'owner_password' || response.nextStep === 'owner_setup') {
+        router.replace({
+          pathname: '/owner/login',
+          params: { phone: normalizedInput },
+        });
+        return;
       }
-      setAccessState(response.nextStep);
+
+      router.replace({
+        pathname: '/client/login',
+        params: {
+          phone: normalizedInput,
+          ...(params.intent ? { intent: params.intent } : {}),
+        },
+      });
     } catch (resolutionError) {
       setError(getResolutionError(resolutionError));
       setAccessState('error');
     }
-  }, [clearCredentials, phone, requestOtp]);
-
-  const handleClientVerify = useCallback(async () => {
-    if (!/^\d{6}$/.test(otp)) {
-      setError('El código debe tener exactamente 6 dígitos.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await verifyOtp(phone, otp);
-      clearSessionExit();
-      router.replace(clientDestination);
-    } catch (verifyError) {
-      setError(
-        isHttpError(verifyError) && verifyError.status === 429
-          ? 'Demasiados intentos. Espera unos minutos.'
-          : 'Código incorrecto o expirado. Solicita uno nuevo.',
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [clientDestination, otp, phone, router, verifyOtp]);
-
-  const handleOwnerLogin = useCallback(async () => {
-    if (!password) {
-      setError('Ingresa tu contraseña.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await loginOwner(phone, password);
-      clearSessionExit();
-      router.replace('/owner/dashboard');
-    } catch (loginError) {
-      setError(
-        isHttpError(loginError) && loginError.status === 429
-          ? 'Demasiados intentos. Espera unos minutos.'
-          : 'Teléfono o contraseña incorrectos.',
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [loginOwner, password, phone, router]);
-
-  const handleOwnerSetup = useCallback(async () => {
-    if (!/^\d{6}$/.test(otp)) {
-      setError('El código debe tener exactamente 6 dígitos.');
-      return;
-    }
-    if (password.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Las contraseñas no coinciden.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const session = await verifyOwnerSetup(phone, otp, password);
-      await setOwnerSession(session.token, session.owner, session.expiresAt);
-      clearSessionExit();
-      router.replace('/owner/dashboard');
-    } catch (setupError) {
-      setError(
-        isHttpError(setupError) && setupError.status === 401
-          ? 'Código incorrecto o expirado.'
-          : 'No se pudo activar el acceso. Revisa los datos.',
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [confirmPassword, otp, password, phone, router, setOwnerSession]);
-
-  const handlePasskeyLogin = useCallback(async () => {
-    setError(null);
-    try {
-      const session = await webAuthn.loginWithPasskey();
-      await setOwnerSession(session.token, session.owner, session.expiresAt);
-      clearSessionExit();
-      router.replace('/owner/dashboard');
-    } catch {
-      // useWebAuthn exposes the user-facing error.
-    }
-  }, [router, setOwnerSession, webAuthn]);
+  }, [params.intent, phone, router]);
 
   if (authStatus === 'loading' || authStatus === 'owner' || authStatus === 'client') {
     return (
@@ -276,57 +152,6 @@ export default function AccessScreen() {
         ) : null}
 
         {accessState === 'resolving_next_step' ? <ResolvingStep /> : null}
-
-        {accessState === 'client_otp' ? (
-          <ClientOtpStep
-            phone={phone}
-            otp={otp}
-            onChangeOtp={setOtp}
-            error={error}
-            isSubmitting={isSubmitting}
-            onVerify={handleClientVerify}
-            onChangePhone={changePhone}
-          />
-        ) : null}
-
-        {accessState === 'owner_password' ? (
-          <PasswordStep
-            phone={phone}
-            password={password}
-            showPassword={showPassword}
-            onChangePassword={setPassword}
-            onTogglePassword={() => setShowPassword((current) => !current)}
-            error={error ?? webAuthn.error}
-            isSubmitting={isSubmitting}
-            showPasskey={
-              checkedPasskeys &&
-              webAuthn.isSupported &&
-              webAuthn.hasPasskeys === true
-            }
-            passkeyLoading={webAuthn.isLoading}
-            onLogin={handleOwnerLogin}
-            onPasskeyLogin={handlePasskeyLogin}
-            onChangePhone={changePhone}
-          />
-        ) : null}
-
-        {accessState === 'owner_setup' ? (
-          <SetupStep
-            phone={phone}
-            otp={otp}
-            password={password}
-            confirmPassword={confirmPassword}
-            showPassword={showPassword}
-            onChangeOtp={setOtp}
-            onChangePassword={setPassword}
-            onChangeConfirmPassword={setConfirmPassword}
-            onTogglePassword={() => setShowPassword((current) => !current)}
-            error={error}
-            isSubmitting={isSubmitting}
-            onActivate={handleOwnerSetup}
-            onChangePhone={changePhone}
-          />
-        ) : null}
 
         {accessState === 'error' ? (
           <ErrorStep

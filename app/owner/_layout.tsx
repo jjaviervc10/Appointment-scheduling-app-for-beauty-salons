@@ -32,13 +32,15 @@ export default function OwnerLayout() {
   useEffect(() => {
     if (authStatus === 'loading') return;
 
-    if (authStatus !== 'owner') {
-      router.replace('/access');
+    if (isLoginRoute) {
+      if (authStatus === 'owner') {
+        router.replace('/owner/dashboard');
+      }
       return;
     }
 
-    if (isLoginRoute) {
-      router.replace('/owner/dashboard');
+    if (authStatus !== 'owner') {
+      router.replace('/access');
     }
   }, [authStatus, isLoginRoute, router]);
 
@@ -60,8 +62,12 @@ export default function OwnerLayout() {
     );
   }
 
+  if (isLoginRoute) {
+    return <Slot />;
+  }
+
   // Keep a visible transition state while protected-route redirects resolve.
-  if (isLoginRoute || authStatus !== 'owner') {
+  if (authStatus !== 'owner') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.black }}>
         <ActivityIndicator color={colors.gold} />

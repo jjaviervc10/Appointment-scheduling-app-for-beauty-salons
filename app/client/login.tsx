@@ -16,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, radii, spacing, typography } from '../../src/theme';
@@ -27,10 +27,13 @@ type Step = 'phone' | 'code';
 
 export default function ClientLoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ phone?: string; intent?: string }>();
   const { requestOtp, verifyOtp } = useAuthContext();
 
   const [step, setStep] = useState<Step>('phone');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(() =>
+    typeof params.phone === 'string' ? params.phone.replace(/\D/g, '').slice(-10) : '',
+  );
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +89,7 @@ export default function ClientLoginScreen() {
     try {
       await verifyOtp(phoneSentTo, codeVal);
       clearSessionExit();
-      router.replace('/client/appointments');
+      router.replace(params.intent === 'booking' ? '/client/booking' : '/client/appointments');
     } catch (err: unknown) {
       const e = err as { status?: number };
       if (e.status === 429) {
@@ -98,7 +101,7 @@ export default function ClientLoginScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [code, phoneSentTo, verifyOtp, router]);
+  }, [code, params.intent, phoneSentTo, verifyOtp, router]);
 
   // ── Go back to phone step ────────────────────────────────────
 
