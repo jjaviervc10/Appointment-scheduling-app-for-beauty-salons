@@ -18,6 +18,11 @@ import { useAuthContext } from '../src/contexts/AuthContext';
 import { getAuthNextStep } from '../src/services/authApi';
 import { isHttpError } from '../src/types/api';
 import { colors, radii, spacing, typography } from '../src/theme';
+import {
+  formatMexicanPhoneForDisplay,
+  getMexicanPhoneLocalDigits,
+  toMexicanPhoneForAuthApi,
+} from '../src/utils/phone';
 
 type AccessState =
   | 'phone'
@@ -32,20 +37,6 @@ function getResolutionError(error: unknown): string {
   }
 
   return 'Revisa tu conexión e intenta nuevamente.';
-}
-
-function normalizeMexicanPhoneInput(rawValue: string): string {
-  const digits = rawValue.replace(/\D/g, '');
-
-  if (digits.length >= 13 && digits.startsWith('521')) {
-    return digits.slice(3, 13);
-  }
-
-  if (digits.length >= 12 && digits.startsWith('52')) {
-    return digits.slice(2, 12);
-  }
-
-  return digits.slice(0, 10);
 }
 
 export default function AccessScreen() {
@@ -75,24 +66,26 @@ export default function AccessScreen() {
   }, []);
 
   const handleContinue = useCallback(async () => {
-    const normalizedInput = normalizeMexicanPhoneInput(phone);
+    const localDigits = getMexicanPhoneLocalDigits(phone);
 
-    if (normalizedInput.length !== 10) {
+    if (localDigits.length !== 10) {
       setError('Ingresa un número de WhatsApp válido.');
       return;
     }
 
-    setPhone(normalizedInput);
+    const authPhone = toMexicanPhoneForAuthApi(localDigits);
+
+    setPhone(localDigits);
     setError(null);
     setAccessState('resolving_next_step');
 
     try {
-      const response = await getAuthNextStep(normalizedInput);
+      const response = await getAuthNextStep(authPhone);
 
       if (response.nextStep === 'owner_password' || response.nextStep === 'owner_setup') {
         router.replace({
           pathname: '/owner/login',
-          params: { phone: normalizedInput },
+          params: { phone: authPhone },
         });
         return;
       }
@@ -100,7 +93,7 @@ export default function AccessScreen() {
       router.replace({
         pathname: '/client/login',
         params: {
-          phone: normalizedInput,
+          phone: authPhone,
           ...(params.intent ? { intent: params.intent } : {}),
         },
       });
@@ -144,7 +137,7 @@ export default function AccessScreen() {
             phone={phone}
             error={error}
             onChangePhone={(value) => {
-              setPhone(normalizeMexicanPhoneInput(value));
+              setPhone(getMexicanPhoneLocalDigits(value));
               setError(null);
             }}
             onContinue={handleContinue}
@@ -463,7 +456,7 @@ function PhoneSummary({ phone }: { phone: string }) {
   return (
     <View style={styles.phoneSummary}>
       <Ionicons name="logo-whatsapp" size={18} color={colors.gold} />
-      <Text style={styles.phoneSummaryText}>+52 {phone}</Text>
+      <Text style={styles.phoneSummaryText}>{formatMexicanPhoneForDisplay(phone)}</Text>
     </View>
   );
 }

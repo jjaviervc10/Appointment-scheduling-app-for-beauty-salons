@@ -28,6 +28,11 @@ import {
   verifyOwnerSetup,
 } from '../../src/services/authApi';
 import { clearSessionExit } from '../../src/utils/sessionExit';
+import {
+  formatMexicanPhoneForDisplay,
+  isValidMexicanPhoneInput,
+  toMexicanPhoneForAuthApi,
+} from '../../src/utils/phone';
 
 type OwnerAccessMode = 'loading' | 'error' | 'setup' | 'login';
 type SetupStep = 'phone' | 'verify';
@@ -45,7 +50,7 @@ export default function OwnerLoginScreen() {
   const [mode, setMode] = useState<OwnerAccessMode>('loading');
   const [setupStep, setSetupStep] = useState<SetupStep>('phone');
   const [phone, setPhone] = useState(() =>
-    typeof params.phone === 'string' ? params.phone.replace(/\D/g, '').slice(-10) : '',
+    typeof params.phone === 'string' ? formatMexicanPhoneForDisplay(params.phone) : '',
   );
   const [setupPhone, setSetupPhone] = useState('');
   const [code, setCode] = useState('');
@@ -86,10 +91,10 @@ export default function OwnerLoginScreen() {
   }, [mode, webAuthn.isSupported]);
 
   const handleLogin = useCallback(async () => {
-    const phoneVal = phone.trim();
+    const phoneVal = toMexicanPhoneForAuthApi(phone);
     const passwordVal = password;
 
-    if (!phoneVal || !passwordVal) {
+    if (!isValidMexicanPhoneInput(phone) || !passwordVal) {
       setError('Ingresa tu telefono y contrasena.');
       return;
     }
@@ -116,9 +121,9 @@ export default function OwnerLoginScreen() {
   }, [phone, password, loginOwner, router]);
 
   const handleSetupRequest = useCallback(async () => {
-    const phoneVal = phone.trim();
+    const phoneVal = toMexicanPhoneForAuthApi(phone);
 
-    if (!phoneVal) {
+    if (!isValidMexicanPhoneInput(phone)) {
       setError('Ingresa tu telefono.');
       return;
     }
@@ -317,7 +322,7 @@ export default function OwnerLoginScreen() {
                   label="Telefono"
                   value={phone}
                   onChangeText={setPhone}
-                  placeholder="6143278357"
+                  placeholder="+52 614 215 4006"
                   keyboardType="phone-pad"
                   editable={!isSubmitting}
                   onSubmitEditing={mode === 'setup' ? handleSetupRequest : undefined}

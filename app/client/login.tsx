@@ -157,7 +157,7 @@ export default function ClientLoginScreen() {
                   style={styles.input}
                   value={phone}
                   onChangeText={(v) => setPhone(v.replace(/\D/g, ''))}
-                  placeholder="6143278357"
+                  placeholder="614 000 0000"
                   placeholderTextColor={colors.gray700}
                   keyboardType="phone-pad"
                   autoComplete="tel"
