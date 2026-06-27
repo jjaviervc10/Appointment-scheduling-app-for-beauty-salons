@@ -23,6 +23,8 @@ import { colors, radii, spacing, typography } from '../../src/theme';
 import { useAuthContext } from '../../src/contexts/AuthContext';
 import { useWebAuthn } from '../../src/hooks/useWebAuthn';
 import {
+  type AuthNextStep,
+  getAuthNextStep,
   getOwnerSetupStatus,
   requestOwnerSetup,
   verifyOwnerSetup,
@@ -41,9 +43,15 @@ function getStatus(error: unknown): number | undefined {
   return (error as { status?: number } | null)?.status;
 }
 
+function getOwnerModeFromNextStep(nextStep?: string): Exclude<OwnerAccessMode, 'loading' | 'error'> | null {
+  if (nextStep === 'owner_password') return 'login';
+  if (nextStep === 'owner_setup') return 'setup';
+  return null;
+}
+
 export default function OwnerLoginScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ phone?: string }>();
+  const params = useLocalSearchParams<{ phone?: string; nextStep?: AuthNextStep }>();
   const { loginOwner, setOwnerSession } = useAuthContext();
   const webAuthn = useWebAuthn();
 
@@ -62,6 +70,34 @@ export default function OwnerLoginScreen() {
   const [checkedPasskeys, setCheckedPasskeys] = useState(false);
 
   const loadSetupStatus = useCallback(async () => {
+    const ownerModeFromNextStep = getOwnerModeFromNextStep(params.nextStep);
+    if (ownerModeFromNextStep) {
+      setMode(ownerModeFromNextStep);
+      setSetupStep('phone');
+      setError(null);
+      return;
+    }
+
+    if (typeof params.phone === 'string' && isValidMexicanPhoneInput(params.phone)) {
+      setMode('loading');
+      setError(null);
+
+      try {
+        const response = await getAuthNextStep(toMexicanPhoneForAuthApi(params.phone));
+        const ownerModeFromPhone = getOwnerModeFromNextStep(response.nextStep);
+
+        if (ownerModeFromPhone) {
+          setMode(ownerModeFromPhone);
+          setSetupStep('phone');
+          return;
+        }
+      } catch {
+        setMode('error');
+        setError('No se pudo consultar el estado de acceso. Revisa tu conexion e intenta de nuevo.');
+        return;
+      }
+    }
+
     setMode('loading');
     setError(null);
 
@@ -73,7 +109,7 @@ export default function OwnerLoginScreen() {
       setMode('error');
       setError('No se pudo consultar el estado de acceso. Revisa tu conexion e intenta de nuevo.');
     }
-  }, []);
+  }, [params.nextStep, params.phone]);
 
   useEffect(() => {
     void loadSetupStatus();
@@ -132,6 +168,22 @@ export default function OwnerLoginScreen() {
     setError(null);
 
     try {
+      const response = await getAuthNextStep(phoneVal);
+
+      if (response.nextStep === 'owner_password') {
+        setMode('login');
+        setSetupStep('phone');
+        return;
+      }
+
+      if (response.nextStep !== 'owner_setup') {
+        router.replace({
+          pathname: '/client/login',
+          params: { phone: phoneVal },
+        });
+        return;
+      }
+
       await requestOwnerSetup(phoneVal);
       setSetupPhone(phoneVal);
       setSetupStep('verify');
@@ -151,7 +203,7 @@ export default function OwnerLoginScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [phone]);
+  }, [phone, router]);
 
   const handleSetupVerify = useCallback(async () => {
     const codeVal = code.trim();

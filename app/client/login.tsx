@@ -22,6 +22,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, radii, spacing, typography } from '../../src/theme';
 import { useAuthContext } from '../../src/contexts/AuthContext';
 import { clearSessionExit } from '../../src/utils/sessionExit';
+import { getAuthNextStep } from '../../src/services/authApi';
+import {
+  formatMexicanPhoneForDisplay,
+  getMexicanPhoneLocalDigits,
+  toMexicanPhoneForAuthApi,
+} from '../../src/utils/phone';
 
 type Step = 'phone' | 'code';
 
@@ -32,7 +38,7 @@ export default function ClientLoginScreen() {
 
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState(() =>
-    typeof params.phone === 'string' ? params.phone.replace(/\D/g, '').slice(-10) : '',
+    typeof params.phone === 'string' ? getMexicanPhoneLocalDigits(params.phone) : '',
   );
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -44,19 +50,32 @@ export default function ClientLoginScreen() {
   // ── Step 1: request OTP ──────────────────────────────────────
 
   const handleRequestOtp = useCallback(async () => {
-    const phoneVal = phone.trim().replace(/\D/g, '');
+    const localDigits = getMexicanPhoneLocalDigits(phone);
 
-    if (phoneVal.length < 7) {
+    if (localDigits.length !== 10) {
       setError('Ingresa un número de teléfono válido.');
       return;
     }
+
+    const authPhone = toMexicanPhoneForAuthApi(localDigits);
 
     setIsLoading(true);
     setError(null);
 
     try {
-      await requestOtp(phoneVal);
-      setPhoneSentTo(phoneVal);
+      const response = await getAuthNextStep(authPhone);
+
+      if (response.nextStep === 'owner_password' || response.nextStep === 'owner_setup') {
+        router.replace({
+          pathname: '/owner/login',
+          params: { phone: authPhone, nextStep: response.nextStep },
+        });
+        return;
+      }
+
+      await requestOtp(authPhone);
+      setPhone(localDigits);
+      setPhoneSentTo(authPhone);
       setStep('code');
       setTimeout(() => codeInputRef.current?.focus(), 200);
     } catch (err: unknown) {
@@ -71,7 +90,7 @@ export default function ClientLoginScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [phone, requestOtp]);
+  }, [phone, requestOtp, router]);
 
   // ── Step 2: verify OTP ───────────────────────────────────────
 
@@ -135,7 +154,7 @@ export default function ClientLoginScreen() {
           <Text style={styles.subtitle}>
             {step === 'phone'
               ? 'Recibirás un código de verificación por WhatsApp'
-              : `Enviamos un código al número ${phoneSentTo}`}
+              : `Enviamos un código al número ${formatMexicanPhoneForDisplay(phoneSentTo)}`}
           </Text>
         </View>
 
@@ -156,7 +175,7 @@ export default function ClientLoginScreen() {
                 <TextInput
                   style={styles.input}
                   value={phone}
-                  onChangeText={(v) => setPhone(v.replace(/\D/g, ''))}
+                  onChangeText={(v) => setPhone(getMexicanPhoneLocalDigits(v))}
                   placeholder="614 000 0000"
                   placeholderTextColor={colors.gray700}
                   keyboardType="phone-pad"

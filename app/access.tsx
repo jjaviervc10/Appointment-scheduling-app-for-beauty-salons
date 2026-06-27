@@ -85,7 +85,7 @@ export default function AccessScreen() {
       if (response.nextStep === 'owner_password' || response.nextStep === 'owner_setup') {
         router.replace({
           pathname: '/owner/login',
-          params: { phone: authPhone },
+          params: { phone: authPhone, nextStep: response.nextStep },
         });
         return;
       }
