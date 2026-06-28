@@ -24,6 +24,8 @@ import type {
   OwnerWeeklyAvailabilityDeleteResponse,
   OwnerSettings,
   OwnerSettingsResponse,
+  OwnerShareAvailabilityRange,
+  OwnerShareAvailabilityResponse,
   CreateIncidentInput,
   CreateIncidentResponse,
   OwnerIncident,
@@ -367,6 +369,24 @@ export async function updateOwnerSettings(
 }
 
 // ─── Incidents ────────────────────────────────────────────────────────────────
+
+export async function getOwnerShareAvailability(params: {
+  range: OwnerShareAvailabilityRange;
+  date?: string;
+  serviceId?: string;
+  timezone?: string;
+}): Promise<OwnerShareAvailabilityResponse> {
+  const query = new URLSearchParams({ range: params.range });
+
+  if (params.date) query.set('date', params.date);
+  if (params.serviceId) query.set('serviceId', params.serviceId);
+  if (params.timezone) query.set('timezone', params.timezone);
+
+  return apiRequest<OwnerShareAvailabilityResponse>(
+    `/api/owner/share-availability?${query.toString()}`,
+    { requiresOwnerAuth: true },
+  );
+}
 
 export async function createOwnerIncident(
   input: CreateIncidentInput

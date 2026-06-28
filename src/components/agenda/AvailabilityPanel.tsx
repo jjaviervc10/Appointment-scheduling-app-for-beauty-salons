@@ -29,6 +29,7 @@ import {
   type DayPatch,
 } from '../availability/DayAvailabilityEditor';
 import { formatLocalDateKey } from '../../utils/date';
+import { ShareAvailabilityModal } from '../availability/ShareAvailabilityModal';
 
 // --- Constants ----------------------------------------------------------------
 
@@ -252,6 +253,7 @@ export function AvailabilityPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [editingDay, setEditingDay] = useState<DayOfWeek | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const { width, height: windowHeight } = useWindowDimensions();
   const isDesktop = width >= 768;
@@ -443,6 +445,23 @@ export function AvailabilityPanel({
           </TouchableOpacity>
         </View>
 
+        <View style={styles.shareRow}>
+          <View style={styles.shareRowCopy}>
+            <Text style={styles.shareRowTitle}>Comparte horarios disponibles</Text>
+            <Text style={styles.shareRowText}>
+              Genera una imagen y texto listos para publicar en tu estado de WhatsApp.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.shareBtn}
+            onPress={() => setShowShareModal(true)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="share-social-outline" size={16} color={colors.black} />
+            <Text style={styles.shareBtnText}>Compartir</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Summary stats */}
         {availability.length > 0 ? (
           <AvailabilitySummary availability={availability} />
@@ -537,6 +556,11 @@ export function AvailabilityPanel({
           />
         </View>
       ) : null}
+
+      <ShareAvailabilityModal
+        visible={showShareModal}
+        onClose={() => setShowShareModal(false)}
+      />
     </View>
   );
 }
@@ -687,6 +711,46 @@ const styles = StyleSheet.create({
     ...typography.buttonSmall,
     color: colors.gray300,
     fontSize: 13,
+  },
+
+  shareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    backgroundColor: colors.gray900,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  shareRowCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+  },
+  shareRowTitle: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '700',
+  },
+  shareRowText: {
+    ...typography.caption,
+    color: colors.gray500,
+  },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gold,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexShrink: 0,
+  },
+  shareBtnText: {
+    ...typography.buttonSmall,
+    color: colors.black,
   },
 
   noticeBanner: {

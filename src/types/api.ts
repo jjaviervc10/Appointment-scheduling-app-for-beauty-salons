@@ -329,6 +329,52 @@ export interface PublicCancelAppointmentResponse {
   };
 }
 
+export type OwnerShareAvailabilityRange = 'today' | 'tomorrow' | 'week' | 'date';
+
+export interface OwnerShareAvailabilitySlot {
+  startAt: string;
+  endAt: string;
+  label: string;
+}
+
+export interface OwnerShareAvailabilityDay {
+  date: string;
+  label: string;
+  slots: OwnerShareAvailabilitySlot[];
+}
+
+export interface OwnerShareAvailabilityResponse {
+  ok: true;
+  business: {
+    name: string;
+    timezone: string;
+  };
+  range: {
+    type: OwnerShareAvailabilityRange;
+    startDate: string;
+    endDate: string;
+    label: string;
+  };
+  service: {
+    id: string;
+    name: string;
+    durationMinutes: number;
+  } | null;
+  days: OwnerShareAvailabilityDay[];
+  summary: {
+    totalSlots: number;
+    hasAvailability: boolean;
+    excludedExpiredSlots: boolean;
+    updatedAt: string;
+  };
+  share: {
+    title: string;
+    bodyText: string;
+    bookingUrl: string;
+    qrUrl: string | null;
+  };
+}
+
 export class HttpError extends Error {
   readonly status: number;
   readonly details?: ApiErrorDetails;
