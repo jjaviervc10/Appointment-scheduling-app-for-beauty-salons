@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,12 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'qrcode';
 import { colors, radii, spacing, typography } from '../../theme';
-import { getOwnerServices, getOwnerShareAvailability } from '../../services/ownerApi';
-import type {
-  OwnerServiceRow,
-  OwnerShareAvailabilityRange,
-  OwnerShareAvailabilityResponse,
-} from '../../types/api';
+import { getOwnerShareAvailability } from '../../services/ownerApi';
+import type { OwnerShareAvailabilityRange, OwnerShareAvailabilityResponse } from '../../types/api';
 import { formatLocalDateKey } from '../../utils/date';
 
 interface ShareAvailabilityModalProps {
@@ -57,6 +53,20 @@ function formatUpdatedAt(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })}`;
+}
+
+function getBookingLinkLabel(data: OwnerShareAvailabilityResponse | null): string {
+  const businessName = data?.business.name?.trim();
+  if (businessName) return businessName;
+
+  const url = data?.share.bookingUrl;
+  if (!url) return 'Jaquelina Barber Studio';
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'Jaquelina Barber Studio';
+  }
 }
 
 function flattenSlots(data: OwnerShareAvailabilityResponse): Array<{
@@ -262,16 +272,28 @@ async function renderAvailabilityImage(
   ctx.font = '800 44px Arial';
   ctx.fillText('Agenda por WhatsApp', 110, 1360);
 
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  drawRoundRect(ctx, 110, 1400, 860, 210, 34);
+  ctx.fill();
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '800 34px Arial';
+  ctx.fillText('Escanea el QR para reservar', 150, 1470);
+
+  ctx.fillStyle = '#C8A84E';
+  ctx.font = '700 28px Arial';
+  ctx.fillText(getBookingLinkLabel(data), 150, 1520);
+
   ctx.fillStyle = '#BDBDBD';
-  ctx.font = '400 28px Arial';
-  drawWrappedText(ctx, data.share.bookingUrl, 110, 1420, 560, 38, 3);
+  ctx.font = '400 24px Arial';
+  ctx.fillText('El enlace completo va en el texto del estado', 150, 1562);
 
   if (qrDataUrl) {
     const qr = await loadDomImage(qrDataUrl);
     ctx.fillStyle = '#FFFFFF';
-    drawRoundRect(ctx, 724, 1332, 246, 246, 24);
+    drawRoundRect(ctx, 782, 1430, 158, 158, 22);
     ctx.fill();
-    ctx.drawImage(qr, 744, 1352, 206, 206);
+    ctx.drawImage(qr, 798, 1446, 126, 126);
   }
 
   ctx.fillStyle = 'rgba(200,168,78,0.14)';
@@ -296,9 +318,6 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
   const isMobile = width < 768;
   const [range, setRange] = useState<OwnerShareAvailabilityRange>('today');
   const [customDate, setCustomDate] = useState(getDefaultDate('today'));
-  const [services, setServices] = useState<OwnerServiceRow[]>([]);
-  const [selectedServiceId, setSelectedServiceId] = useState('');
-  const [servicesLoading, setServicesLoading] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareData, setShareData] = useState<OwnerShareAvailabilityResponse | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -306,39 +325,7 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [workingAction, setWorkingAction] = useState<'copy' | 'download' | 'share' | null>(null);
 
-  const selectedService = useMemo(
-    () => services.find((service) => service.id === selectedServiceId) ?? null,
-    [selectedServiceId, services],
-  );
-
   const effectiveDate = range === 'date' ? customDate : getDefaultDate(range);
-
-  useEffect(() => {
-    if (!visible) return;
-
-    let cancelled = false;
-    setServicesLoading(true);
-    setError(null);
-
-    getOwnerServices({ active: true })
-      .then((result) => {
-        if (cancelled) return;
-        setServices(result);
-        setSelectedServiceId((prev) => prev || result[0]?.id || '');
-      })
-      .catch((loadError) => {
-        if (cancelled) return;
-        setServices([]);
-        setError(loadError instanceof Error ? loadError.message : 'No se pudieron cargar servicios.');
-      })
-      .finally(() => {
-        if (!cancelled) setServicesLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -351,7 +338,6 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
     getOwnerShareAvailability({
       range,
       date: range === 'date' ? effectiveDate : undefined,
-      serviceId: selectedServiceId || undefined,
     })
       .then(async (data) => {
         if (cancelled) return;
@@ -380,7 +366,7 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
     return () => {
       cancelled = true;
     };
-  }, [effectiveDate, range, selectedServiceId, visible]);
+  }, [effectiveDate, range, visible]);
 
   const handleClose = useCallback(() => {
     setActionMessage(null);
@@ -465,6 +451,7 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
 
   const slots = shareData ? flattenSlots(shareData) : [];
   const previewSlots = slots.slice(0, 4);
+  const bookingLinkLabel = getBookingLinkLabel(shareData);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -518,33 +505,6 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
                 </View>
               ) : null}
 
-              <Text style={styles.sectionTitle}>Servicio</Text>
-              {servicesLoading ? (
-                <View style={styles.inlineState}>
-                  <ActivityIndicator size="small" color={colors.gold} />
-                  <Text style={styles.inlineStateText}>Cargando servicios...</Text>
-                </View>
-              ) : services.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceChips}>
-                  {services.map((service) => {
-                    const active = selectedServiceId === service.id;
-                    return (
-                      <TouchableOpacity
-                        key={service.id}
-                        style={[styles.serviceChip, active && styles.serviceChipActive]}
-                        onPress={() => setSelectedServiceId(service.id)}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[styles.serviceName, active && styles.serviceNameActive]}>{service.name}</Text>
-                        <Text style={styles.serviceMeta}>{service.duration_minutes} min</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              ) : (
-                <Text style={styles.emptyText}>No hay servicios activos. El backend usara el valor disponible.</Text>
-              )}
-
               {error ? (
                 <View style={styles.errorBanner}>
                   <Ionicons name="alert-circle-outline" size={16} color={colors.error} />
@@ -570,8 +530,8 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
                     <Text style={styles.summaryValue}>{shareData.summary.totalSlots}</Text>
                   </View>
                   <View>
-                    <Text style={styles.summaryLabel}>Servicio</Text>
-                    <Text style={styles.summaryValue}>{shareData.service?.name ?? selectedService?.name ?? 'General'}</Text>
+                    <Text style={styles.summaryLabel}>Enlace</Text>
+                    <Text style={styles.summaryValue}>Reserva publica</Text>
                   </View>
                 </View>
               ) : null}
@@ -617,15 +577,20 @@ export function ShareAvailabilityModal({ visible, onClose }: ShareAvailabilityMo
                 </View>
 
                 <Text style={styles.statusCta}>Agenda por WhatsApp</Text>
-                <Text style={styles.statusUrl} numberOfLines={2}>{shareData?.share.bookingUrl ?? 'https://...'}</Text>
-
-                {qrDataUrl ? (
-                  <Image source={{ uri: qrDataUrl }} style={styles.qrImage} resizeMode="contain" />
-                ) : (
-                  <View style={styles.qrPlaceholder}>
-                    <Ionicons name="qr-code-outline" size={34} color={colors.gray500} />
+                <View style={styles.statusBookingBox}>
+                  <View style={styles.statusBookingCopy}>
+                    <Text style={styles.statusBookingTitle}>Escanea el QR para reservar</Text>
+                    <Text style={styles.statusBookingLink} numberOfLines={1}>{bookingLinkLabel}</Text>
                   </View>
-                )}
+
+                  {qrDataUrl ? (
+                    <Image source={{ uri: qrDataUrl }} style={styles.qrImage} resizeMode="contain" />
+                  ) : (
+                    <View style={styles.qrPlaceholder}>
+                      <Ionicons name="qr-code-outline" size={34} color={colors.gray500} />
+                    </View>
+                  )}
+                </View>
 
                 <View style={styles.statusNote}>
                   <Text style={styles.statusNoteText}>Los horarios vencidos no se incluyen</Text>
@@ -792,27 +757,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
   },
-  serviceChips: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  serviceChip: {
-    minWidth: 150,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.gray800,
-    backgroundColor: colors.gray900,
-    padding: spacing.md,
-    gap: spacing.xxs,
-  },
-  serviceChipActive: {
-    borderColor: colors.gold,
-    backgroundColor: colors.gold + '12',
-  },
-  serviceName: { ...typography.bodySmall, color: colors.white, fontWeight: '700' },
-  serviceNameActive: { color: colors.gold },
-  serviceMeta: { ...typography.caption, color: colors.gray500 },
   inlineState: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -834,7 +778,6 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   errorText: { ...typography.bodySmall, color: colors.error, flex: 1 },
-  emptyText: { ...typography.bodySmall, color: colors.gray500 },
   summary: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -901,23 +844,35 @@ const styles = StyleSheet.create({
   statusEmpty: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: spacing.sm },
   statusEmptyText: { ...typography.caption, color: colors.gray500, textAlign: 'center' },
   statusCta: { ...typography.subtitle, color: colors.gold, fontWeight: '900' },
-  statusUrl: { ...typography.caption, color: colors.gray400 },
+  statusBookingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.white + '10',
+    padding: spacing.sm,
+  },
+  statusBookingCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: spacing.xxs,
+  },
+  statusBookingTitle: { ...typography.caption, color: colors.white, fontWeight: '800' },
+  statusBookingLink: { ...typography.caption, color: colors.gold, fontWeight: '700' },
   qrImage: {
-    width: 90,
-    height: 90,
+    width: 78,
+    height: 78,
     borderRadius: radii.sm,
     backgroundColor: colors.white,
-    alignSelf: 'flex-end',
   },
   qrPlaceholder: {
-    width: 90,
-    height: 90,
+    width: 78,
+    height: 78,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.gray700,
     alignItems: 'center',
     justifyContent: 'center',
-    alignSelf: 'flex-end',
   },
   statusNote: {
     borderRadius: radii.full,
