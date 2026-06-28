@@ -28,6 +28,7 @@ import {
   DayAvailabilityEditor,
   type DayPatch,
 } from '../availability/DayAvailabilityEditor';
+import { formatLocalDateKey } from '../../utils/date';
 
 // --- Constants ----------------------------------------------------------------
 
@@ -94,6 +95,7 @@ function getMonday(d: Date): Date {
 }
 
 type DayInfo = {
+  dateKey: string;
   date: string;
   monthShort: string;
   monthLong: string;
@@ -105,7 +107,15 @@ type WeekContext = {
   todayDow: DayOfWeek;
   labelShort: string;
   isoMonday: string;
+  isoSunday: string;
   dayInfos: Record<DayOfWeek, DayInfo>;
+};
+
+type TimingNotice = {
+  tone: 'info' | 'warning';
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  body: string;
 };
 
 function getWeekContext(weekOffset: number): WeekContext {
@@ -132,7 +142,13 @@ function getWeekContext(weekOffset: number): WeekContext {
     const d = new Date(monday);
     d.setDate(d.getDate() + i);
     const dow = d.getDay() as DayOfWeek;
+    const dateKey = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
     dayInfosPartial[dow] = {
+      dateKey,
       date: String(d.getDate()),
       monthShort: d.toLocaleDateString('es-MX', { month: 'short' }),
       monthLong: d.toLocaleDateString('es-MX', { month: 'long' }),
@@ -145,7 +161,77 @@ function getWeekContext(weekOffset: number): WeekContext {
     todayDow,
     labelShort,
     isoMonday,
+    isoSunday: [
+      sunday.getFullYear(),
+      String(sunday.getMonth() + 1).padStart(2, '0'),
+      String(sunday.getDate()).padStart(2, '0'),
+    ].join('-'),
     dayInfos: dayInfosPartial as Record<DayOfWeek, DayInfo>,
+  };
+}
+
+function parseClockMinutes(value: string): number | null {
+  const [hourRaw, minuteRaw = '0'] = value.split(':');
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
+}
+
+function currentClockMinutes(now: Date): number {
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function getTimingNotice(
+  weekCtx: WeekContext,
+  availability: WeeklyAvailability[],
+  now = new Date(),
+): TimingNotice | null {
+  const todayKey = formatLocalDateKey(now);
+
+  if (todayKey > weekCtx.isoSunday) {
+    return {
+      tone: 'warning',
+      icon: 'alert-circle-outline',
+      title: 'Semana pasada',
+      body: 'Esta semana ya termino. Puedes guardar ajustes para mantener tu configuracion ordenada, pero los dias pasados no apareceran como horarios para nuevas citas.',
+    };
+  }
+
+  if (todayKey < weekCtx.isoMonday || !weekCtx.isCurrentWeek) {
+    return null;
+  }
+
+  const todayAvailability = availability.find((row) => row.day_of_week === weekCtx.todayDow);
+  const todayStartMinutes =
+    todayAvailability?.is_active ? parseClockMinutes(todayAvailability.start_time) : null;
+  const workdayAlreadyStarted =
+    todayStartMinutes !== null && currentClockMinutes(now) >= todayStartMinutes;
+  const pastDaysCount = DISPLAY_DAYS.filter((dow) => weekCtx.dayInfos[dow].dateKey < todayKey).length;
+
+  if (workdayAlreadyStarted) {
+    return {
+      tone: 'warning',
+      icon: 'time-outline',
+      title: 'La semana ya esta en curso',
+      body: 'Los dias anteriores y los horarios de hoy que ya pasaron no se mostraran para nuevas citas. Para evitar confusiones, conviene registrar la disponibilidad con al menos un dia de anticipacion.',
+    };
+  }
+
+  if (pastDaysCount > 0) {
+    return {
+      tone: 'info',
+      icon: 'information-circle-outline',
+      title: 'Semana parcialmente iniciada',
+      body: 'Los dias que ya pasaron no apareceran como disponibles. Los horarios futuros de esta semana si podran mostrarse cuando cumplan las reglas de anticipacion.',
+    };
+  }
+
+  return {
+    tone: 'info',
+    icon: 'calendar-outline',
+    title: 'Recomendacion de anticipacion',
+    body: 'Si configuras la disponibilidad el mismo dia que inicia la semana, hazlo antes de comenzar tu horario laboral. Lo ideal es dejarla lista desde el dia anterior.',
   };
 }
 
@@ -172,6 +258,10 @@ export function AvailabilityPanel({
   const editorMobileHeight = Math.round(windowHeight * 0.65);
 
   const weekCtx = useMemo(() => getWeekContext(weekOffset), [weekOffset]);
+  const timingNotice = useMemo(
+    () => getTimingNotice(weekCtx, availability),
+    [availability, weekCtx],
+  );
 
   // --- Data loading -----------------------------------------------------------
 
@@ -229,9 +319,11 @@ export function AvailabilityPanel({
         );
         setAvailability(normalizeAvailability(result.data));
         setNotice(
-          applyToAll
-            ? 'Horario aplicado a toda la semana correctamente.'
-            : 'Disponibilidad guardada correctamente.',
+          timingNotice
+            ? 'Disponibilidad guardada. Los dias u horarios que ya pasaron no apareceran para nuevas citas.'
+            : applyToAll
+              ? 'Horario aplicado a toda la semana correctamente.'
+              : 'Disponibilidad guardada correctamente.',
         );
         setEditingDay(null);
       } catch (saveErr) {
@@ -248,7 +340,7 @@ export function AvailabilityPanel({
         setSaving(false);
       }
     },
-    [availability, weekCtx],
+    [availability, timingNotice, weekCtx],
   );
 
   // --- Derived state ----------------------------------------------------------
@@ -356,6 +448,8 @@ export function AvailabilityPanel({
           <AvailabilitySummary availability={availability} />
         ) : null}
 
+        {timingNotice ? <TimingNoticeBanner notice={timingNotice} /> : null}
+
         {/* Notice banner */}
         {notice ? (
           <TouchableOpacity
@@ -443,6 +537,28 @@ export function AvailabilityPanel({
           />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function TimingNoticeBanner({ notice }: { notice: TimingNotice }) {
+  const isWarning = notice.tone === 'warning';
+  const accentColor = isWarning ? colors.warning : colors.gold;
+
+  return (
+    <View
+      style={[
+        styles.timingNotice,
+        isWarning ? styles.timingNoticeWarning : styles.timingNoticeInfo,
+      ]}
+    >
+      <View style={[styles.timingNoticeIcon, { backgroundColor: accentColor + '20' }]}>
+        <Ionicons name={notice.icon} size={16} color={accentColor} />
+      </View>
+      <View style={styles.timingNoticeCopy}>
+        <Text style={styles.timingNoticeTitle}>{notice.title}</Text>
+        <Text style={styles.timingNoticeBody}>{notice.body}</Text>
+      </View>
     </View>
   );
 }
@@ -585,6 +701,46 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   noticeText: { ...typography.bodySmall, color: colors.gray300, flex: 1 },
+
+  timingNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  timingNoticeWarning: {
+    backgroundColor: colors.warning + '10',
+    borderColor: colors.warning + '35',
+  },
+  timingNoticeInfo: {
+    backgroundColor: colors.gold + '0F',
+    borderColor: colors.gold + '30',
+  },
+  timingNoticeIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radii.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  timingNoticeCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+  },
+  timingNoticeTitle: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '700',
+  },
+  timingNoticeBody: {
+    ...typography.caption,
+    color: colors.gray400,
+    lineHeight: 16,
+  },
 
   daysList: {
     backgroundColor: colors.gray900,
