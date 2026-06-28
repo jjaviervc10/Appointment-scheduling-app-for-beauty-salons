@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { colors, spacing, typography, radii } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
 import { DayView } from '../../src/components/agenda/DayView';
@@ -41,8 +42,16 @@ function getMonday(d: Date): Date {
   return date;
 }
 
+function getInitialTab(tab: string | string[] | undefined): AgendaTab {
+  const value = Array.isArray(tab) ? tab[0] : tab;
+  if (value === 'availability' || value === 'blocks') return value;
+  return 'day';
+}
+
 export default function AgendaScreen() {
-  const [activeTab, setActiveTab] = useState<AgendaTab>('day');
+  const params = useLocalSearchParams<{ tab?: string | string[] }>();
+  const initialTab = getInitialTab(params.tab);
+  const [activeTab, setActiveTab] = useState<AgendaTab>(initialTab);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [weekStart, setWeekStart] = useState(getMonday(new Date()));
   const [monthDate, setMonthDate] = useState(new Date());
@@ -118,6 +127,10 @@ export default function AgendaScreen() {
   useEffect(() => {
     void loadAppointments();
   }, [loadAppointments]);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const getSubtitle = () => {
     switch (activeTab) {

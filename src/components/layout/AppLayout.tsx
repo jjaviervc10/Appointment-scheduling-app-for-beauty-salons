@@ -9,8 +9,8 @@ const MOBILE_BREAKPOINT = 768;
 const BOTTOM_TABS: { key: SidebarRoute; icon: keyof typeof Ionicons.glyphMap; iconActive: keyof typeof Ionicons.glyphMap; label: string }[] = [
   { key: 'dashboard', icon: 'grid-outline', iconActive: 'grid', label: 'Inicio' },
   { key: 'agenda', icon: 'calendar-outline', iconActive: 'calendar', label: 'Agenda' },
-  { key: 'clients', icon: 'people-outline', iconActive: 'people', label: 'Clientes' },
-  { key: 'messages', icon: 'chatbubbles-outline', iconActive: 'chatbubbles', label: 'Mensajes' },
+  { key: 'availability', icon: 'time-outline', iconActive: 'time', label: 'Disponibilidad' },
+  { key: 'blocks', icon: 'shield-outline', iconActive: 'shield', label: 'Bloqueos' },
   { key: 'settings', icon: 'settings-outline', iconActive: 'settings', label: 'Ajustes' },
 ];
 

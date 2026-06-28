@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 
-export type SidebarRoute = 'dashboard' | 'agenda' | 'clients' | 'messages' | 'settings';
+export type SidebarRoute = 'dashboard' | 'agenda' | 'availability' | 'blocks' | 'settings';
 
 interface NavItem {
   key: SidebarRoute;
@@ -14,8 +14,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', icon: 'grid-outline', label: 'Inicio' },
   { key: 'agenda', icon: 'calendar-outline', label: 'Agenda' },
-  { key: 'clients', icon: 'people-outline', label: 'Clientes' },
-  { key: 'messages', icon: 'chatbubbles-outline', label: 'Mensajes' },
+  { key: 'availability', icon: 'time-outline', label: 'Disponibilidad' },
+  { key: 'blocks', icon: 'shield-outline', label: 'Bloqueos' },
   { key: 'settings', icon: 'settings-outline', label: 'Ajustes' },
 ];
 

@@ -1,6 +1,5 @@
 ﻿import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { View, StyleSheet, useWindowDimensions, Text, Alert, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, StyleSheet, useWindowDimensions, Text, Alert, TouchableOpacity, Modal } from 'react-native';
 import { colors, radii, spacing, typography } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
 import { KPIStats, type KPIKey } from '../../src/components/dashboard/KPIStats';
@@ -14,6 +13,8 @@ import { IncidentModal } from '../../src/components/modals/IncidentModal';
 import { RescheduleModal, type RescheduleSimulationResult } from '../../src/components/modals/RescheduleModal';
 import { AppointmentDurationModal } from '../../src/components/modals/AppointmentDurationModal';
 import { KPIFilterModal } from '../../src/components/modals/KPIFilterModal';
+import { ClientsExplorer } from '../../src/components/clients/ClientsExplorer';
+import { MessagesCenter } from '../../src/components/messages/MessagesCenter';
 import type { AppointmentViewModel } from '../../src/types/models';
 import type { TimeBlock } from '../../src/types/database';
 import { fetchAppointmentsByDate, fetchAwaitingAppointments, fetchPendingAppointments, updateAppointmentStatus } from '../../src/services/appointments';
@@ -60,7 +61,6 @@ function logDashboardActionError(action: string, error: unknown, meta?: Record<s
 }
 
 export default function DashboardScreen() {
-  const router = useRouter();
   const todayStr = formatLocalDateKey(new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const selectedDateStr = formatLocalDateKey(selectedDate);
@@ -70,6 +70,8 @@ export default function DashboardScreen() {
   const [showNewAppt, setShowNewAppt] = useState(false);
   const [showBlockTime, setShowBlockTime] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
+  const [showClientSearch, setShowClientSearch] = useState(false);
+  const [showMessagesPanel, setShowMessagesPanel] = useState(false);
   const [rescheduleId, setRescheduleId] = useState<string | null>(null);
   const [approveDurationId, setApproveDurationId] = useState<string | null>(null);
   const [kpiFilter, setKpiFilter] = useState<KPIKey | null>(null);
@@ -549,8 +551,8 @@ export default function DashboardScreen() {
         <QuickActionsBar
           onNewAppointment={() => setShowNewAppt(true)}
           onBlockTime={() => setShowBlockTime(true)}
-          onSearchClient={() => router.push('/owner/clients')}
-          onSendMessage={() => router.push('/owner/messages')}
+          onSearchClient={() => setShowClientSearch(true)}
+          onSendMessage={() => setShowMessagesPanel(true)}
         />
       </View>
 
@@ -608,6 +610,65 @@ export default function DashboardScreen() {
         onClose={() => setShowIncident(false)}
         onCreated={() => void loadDashboardData({ silent: true })}
       />
+      <Modal
+        visible={showClientSearch}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowClientSearch(false)}
+      >
+        <View style={styles.clientSearchOverlay}>
+          <View style={styles.clientSearchPanel}>
+            <View style={styles.clientSearchHeader}>
+              <View style={styles.clientSearchTitleWrap}>
+                <Text style={styles.clientSearchTitle}>Buscar clientes</Text>
+                <Text style={styles.clientSearchSubtitle}>Consulta perfiles sin salir del inicio.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.clientSearchClose}
+                onPress={() => setShowClientSearch(false)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar busqueda de clientes"
+              >
+                <Text style={styles.clientSearchCloseText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+            {showClientSearch ? (
+              <ClientsExplorer
+                autoFocusSearch
+                contentStyle={styles.clientSearchContent}
+              />
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={showMessagesPanel}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMessagesPanel(false)}
+      >
+        <View style={styles.messagesPanelOverlay}>
+          <View style={styles.messagesPanel}>
+            <View style={styles.messagesPanelHeader}>
+              <View style={styles.messagesPanelTitleWrap}>
+                <Text style={styles.messagesPanelTitle}>Mensajes</Text>
+                <Text style={styles.messagesPanelSubtitle}>Canal WhatsApp del estudio.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.messagesPanelClose}
+                onPress={() => setShowMessagesPanel(false)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar mensajes"
+              >
+                <Text style={styles.messagesPanelCloseText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+            {showMessagesPanel ? <MessagesCenter /> : null}
+          </View>
+        </View>
+      </Modal>
       <RescheduleModal
         visible={!!rescheduleId}
         appointment={[...pending, ...awaiting, ...todayAppts].find(a => a.id === rescheduleId) || null}
@@ -746,5 +807,115 @@ const styles = StyleSheet.create({
     color: colors.gold,
     fontSize: 12,
     fontWeight: '700',
+  },
+  clientSearchOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  clientSearchPanel: {
+    width: '100%',
+    maxWidth: 820,
+    height: '90%',
+    maxHeight: '90%',
+    backgroundColor: colors.black,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    overflow: 'hidden',
+  },
+  clientSearchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray800,
+    backgroundColor: colors.gray900,
+  },
+  clientSearchTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  clientSearchTitle: {
+    ...typography.h3,
+    color: colors.white,
+  },
+  clientSearchSubtitle: {
+    ...typography.caption,
+    color: colors.gray500,
+    marginTop: spacing.xxs,
+  },
+  clientSearchClose: {
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  clientSearchCloseText: {
+    ...typography.buttonSmall,
+    color: colors.gold,
+  },
+  clientSearchContent: {
+    padding: spacing.lg,
+    paddingBottom: 0,
+  },
+  messagesPanelOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  messagesPanel: {
+    width: '100%',
+    maxWidth: 960,
+    height: '90%',
+    maxHeight: '90%',
+    backgroundColor: colors.black,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.gray800,
+    overflow: 'hidden',
+  },
+  messagesPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray800,
+    backgroundColor: colors.gray900,
+  },
+  messagesPanelTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  messagesPanelTitle: {
+    ...typography.h3,
+    color: colors.white,
+  },
+  messagesPanelSubtitle: {
+    ...typography.caption,
+    color: colors.gray500,
+    marginTop: spacing.xxs,
+  },
+  messagesPanelClose: {
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  messagesPanelCloseText: {
+    ...typography.buttonSmall,
+    color: colors.gold,
   },
 });
