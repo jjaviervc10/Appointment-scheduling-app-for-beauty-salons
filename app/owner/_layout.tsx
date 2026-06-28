@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Slot, useRouter, usePathname, useLocalSearchParams } from 'expo-router';
+import { Slot, useRouter, usePathname } from 'expo-router';
 import { AppLayout } from '../../src/components/layout/AppLayout';
 import type { SidebarRoute } from '../../src/components/layout/Sidebar';
 import { useAuthContext } from '../../src/contexts/AuthContext';
@@ -9,21 +9,15 @@ import { colors } from '../../src/theme';
 const ROUTE_MAP: Record<SidebarRoute, string> = {
   dashboard: '/owner/dashboard',
   agenda: '/owner/agenda',
-  availability: '/owner/agenda?tab=availability',
-  blocks: '/owner/agenda?tab=blocks',
+  availability: '/owner/availability',
+  blocks: '/owner/blocks',
   settings: '/owner/settings',
 };
 
-function getParamValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function getActiveRoute(pathname: string, tab?: string): SidebarRoute {
-  if (pathname.includes('/agenda')) {
-    if (tab === 'availability') return 'availability';
-    if (tab === 'blocks') return 'blocks';
-    return 'agenda';
-  }
+function getActiveRoute(pathname: string): SidebarRoute {
+  if (pathname.includes('/availability')) return 'availability';
+  if (pathname.includes('/blocks')) return 'blocks';
+  if (pathname.includes('/agenda')) return 'agenda';
   if (pathname.includes('/settings')) return 'settings';
   return 'dashboard';
 }
@@ -31,9 +25,8 @@ function getActiveRoute(pathname: string, tab?: string): SidebarRoute {
 export default function OwnerLayout() {
   const router = useRouter();
   const pathname = usePathname();
-  const params = useLocalSearchParams<{ tab?: string | string[] }>();
   const { authStatus, logoutOwner } = useAuthContext();
-  const activeRoute = getActiveRoute(pathname, getParamValue(params.tab));
+  const activeRoute = getActiveRoute(pathname);
   const isLoginRoute = pathname === '/owner/login';
 
   useEffect(() => {

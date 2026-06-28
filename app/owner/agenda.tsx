@@ -1,14 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
 import { colors, spacing, typography, radii } from '../../src/theme';
 import { TopHeader } from '../../src/components/layout/TopHeader';
 import { DayView } from '../../src/components/agenda/DayView';
 import { WeekView } from '../../src/components/agenda/WeekView';
 import { MonthView } from '../../src/components/agenda/MonthView';
-import { AvailabilityPanel } from '../../src/components/agenda/AvailabilityPanel';
-import { BlocksPanel } from '../../src/components/agenda/BlocksPanel';
 import { FloatingActionButton } from '../../src/components/ui/FloatingActionButton';
 import { NewAppointmentModal } from '../../src/components/modals/NewAppointmentModal';
 import { BlockTimeModal } from '../../src/components/modals/BlockTimeModal';
@@ -19,14 +16,12 @@ import type { AppointmentViewModel } from '../../src/types/models';
 import type { TimeBlock } from '../../src/types/database';
 import { formatLocalDateKey } from '../../src/utils/date';
 
-type AgendaTab = 'day' | 'week' | 'month' | 'availability' | 'blocks';
+type AgendaTab = 'day' | 'week' | 'month';
 
 const TABS: { key: AgendaTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: 'day', label: 'Día', icon: 'today-outline' },
   { key: 'week', label: 'Semana', icon: 'calendar-outline' },
   { key: 'month', label: 'Mes', icon: 'grid-outline' },
-  { key: 'availability', label: 'Disponibilidad', icon: 'time-outline' },
-  { key: 'blocks', label: 'Bloqueos', icon: 'shield-outline' },
 ];
 
 function fmt(d: Date): string {
@@ -42,16 +37,8 @@ function getMonday(d: Date): Date {
   return date;
 }
 
-function getInitialTab(tab: string | string[] | undefined): AgendaTab {
-  const value = Array.isArray(tab) ? tab[0] : tab;
-  if (value === 'availability' || value === 'blocks') return value;
-  return 'day';
-}
-
 export default function AgendaScreen() {
-  const params = useLocalSearchParams<{ tab?: string | string[] }>();
-  const initialTab = getInitialTab(params.tab);
-  const [activeTab, setActiveTab] = useState<AgendaTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<AgendaTab>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [weekStart, setWeekStart] = useState(getMonday(new Date()));
   const [monthDate, setMonthDate] = useState(new Date());
@@ -128,10 +115,6 @@ export default function AgendaScreen() {
     void loadAppointments();
   }, [loadAppointments]);
 
-  useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
-
   const getSubtitle = () => {
     switch (activeTab) {
       case 'day':
@@ -143,10 +126,6 @@ export default function AgendaScreen() {
       }
       case 'month':
         return monthDate.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
-      case 'availability':
-        return 'Configura los horarios disponibles';
-      case 'blocks':
-        return 'Bloqueos de horario e incidencias';
       default:
         return '';
     }
@@ -193,10 +172,6 @@ export default function AgendaScreen() {
             }}
           />
         );
-      case 'availability':
-        return <AvailabilityPanel onGoToBlocks={() => setActiveTab('blocks')} />;
-      case 'blocks':
-        return <BlocksPanel />;
     }
   };
 
