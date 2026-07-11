@@ -23,6 +23,11 @@ export interface OwnerLoginResponse {
   owner: OwnerProfile;
 }
 
+export interface OwnerPasswordResetRequestResponse {
+  ok: true;
+  message: string;
+}
+
 export interface ClientProfile {
   identityId: string;
   phone: string;
@@ -93,6 +98,28 @@ export function verifyOwnerSetup(
   password: string,
 ): Promise<OwnerLoginResponse> {
   return apiRequest<OwnerLoginResponse>('/api/auth/owner/setup/verify', {
+    method: 'POST',
+    auth: 'none',
+    body: { phone, code, password },
+  });
+}
+
+export function requestOwnerPasswordReset(
+  phone: string,
+): Promise<OwnerPasswordResetRequestResponse> {
+  return apiRequest<OwnerPasswordResetRequestResponse>('/api/auth/owner/password-reset/request', {
+    method: 'POST',
+    auth: 'none',
+    body: { phone },
+  });
+}
+
+export function verifyOwnerPasswordReset(
+  phone: string,
+  code: string,
+  password: string,
+): Promise<OwnerLoginResponse> {
+  return apiRequest<OwnerLoginResponse>('/api/auth/owner/password-reset/verify', {
     method: 'POST',
     auth: 'none',
     body: { phone, code, password },

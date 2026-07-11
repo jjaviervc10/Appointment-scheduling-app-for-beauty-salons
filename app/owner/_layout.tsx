@@ -1,16 +1,18 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, usePathname } from 'expo-router';
+import type { Href } from 'expo-router';
 import { AppLayout } from '../../src/components/layout/AppLayout';
 import type { SidebarRoute } from '../../src/components/layout/Sidebar';
 import { useAuthContext } from '../../src/contexts/AuthContext';
 import { colors } from '../../src/theme';
 
-const ROUTE_MAP: Record<SidebarRoute, string> = {
+const ROUTE_MAP: Record<SidebarRoute, Href> = {
   dashboard: '/owner/dashboard',
   agenda: '/owner/agenda',
   availability: '/owner/availability',
   blocks: '/owner/blocks',
+  marketing: '/owner/marketing',
   settings: '/owner/settings',
 };
 
@@ -18,6 +20,7 @@ function getActiveRoute(pathname: string): SidebarRoute {
   if (pathname.includes('/availability')) return 'availability';
   if (pathname.includes('/blocks')) return 'blocks';
   if (pathname.includes('/agenda')) return 'agenda';
+  if (pathname.includes('/marketing')) return 'marketing';
   if (pathname.includes('/settings')) return 'settings';
   return 'dashboard';
 }
@@ -45,7 +48,7 @@ export default function OwnerLayout() {
   }, [authStatus, isLoginRoute, router]);
 
   const handleNavigate = (route: SidebarRoute) => {
-    router.replace(ROUTE_MAP[route] as any);
+    router.replace(ROUTE_MAP[route]);
   };
 
   const handleLogout = async () => {

@@ -3,20 +3,37 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
 
-export type SidebarRoute = 'dashboard' | 'agenda' | 'availability' | 'blocks' | 'settings';
+export type SidebarRoute = 'dashboard' | 'agenda' | 'availability' | 'blocks' | 'settings' | 'marketing';
 
 interface NavItem {
   key: SidebarRoute;
   icon: keyof typeof Ionicons.glyphMap;
+  activeIcon: keyof typeof Ionicons.glyphMap;
   label: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { key: 'dashboard', icon: 'grid-outline', label: 'Inicio' },
-  { key: 'agenda', icon: 'calendar-outline', label: 'Agenda' },
-  { key: 'availability', icon: 'time-outline', label: 'Disponibilidad' },
-  { key: 'blocks', icon: 'shield-outline', label: 'Bloqueos' },
-  { key: 'settings', icon: 'settings-outline', label: 'Ajustes' },
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: 'Operacion',
+    items: [
+      { key: 'dashboard', icon: 'grid-outline', activeIcon: 'grid', label: 'Inicio' },
+      { key: 'agenda', icon: 'calendar-outline', activeIcon: 'calendar', label: 'Agenda' },
+      { key: 'availability', icon: 'time-outline', activeIcon: 'time', label: 'Disponibilidad' },
+      { key: 'blocks', icon: 'shield-outline', activeIcon: 'shield', label: 'Bloqueos' },
+      { key: 'settings', icon: 'settings-outline', activeIcon: 'settings', label: 'Ajustes' },
+    ],
+  },
+  {
+    title: 'Marketing',
+    items: [
+      { key: 'marketing', icon: 'logo-instagram', activeIcon: 'logo-instagram', label: 'Marketing' },
+    ],
+  },
 ];
 
 interface SidebarProps {
@@ -28,7 +45,6 @@ interface SidebarProps {
 export function Sidebar({ activeRoute, onNavigate, onLogout }: SidebarProps) {
   return (
     <View style={styles.container}>
-      {/* Brand */}
       <View style={styles.brand}>
         <Image
           source={require('../../../assets/LogoJL.png')}
@@ -38,31 +54,34 @@ export function Sidebar({ activeRoute, onNavigate, onLogout }: SidebarProps) {
         <Text style={styles.brandName}>JL Studio</Text>
       </View>
 
-      {/* Navigation */}
       <View style={styles.nav}>
-        {NAV_ITEMS.map((item) => {
-          const isActive = activeRoute === item.key;
-          return (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.navItem, isActive && styles.navItemActive]}
-              onPress={() => onNavigate(item.key)}
-              activeOpacity={0.7}
-            >
-              <Ionicons
-                name={isActive ? (item.icon.replace('-outline', '') as any) : item.icon}
-                size={20}
-                color={isActive ? colors.gold : colors.gray500}
-              />
-              <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        {NAV_SECTIONS.map((section) => (
+          <View key={section.title} style={styles.navSection}>
+            <Text style={styles.sectionLabel}>{section.title}</Text>
+            {section.items.map((item) => {
+              const isActive = activeRoute === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.navItem, isActive && styles.navItemActive]}
+                  onPress={() => onNavigate(item.key)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name={isActive ? item.activeIcon : item.icon}
+                    size={20}
+                    color={isActive ? colors.gold : colors.gray500}
+                  />
+                  <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
       </View>
 
-      {/* Bottom section */}
       <View style={styles.bottom}>
         <View style={styles.divider} />
         <TouchableOpacity
@@ -105,7 +124,18 @@ const styles = StyleSheet.create({
   },
   nav: {
     flex: 1,
+    gap: spacing.xl,
+  },
+  navSection: {
     gap: spacing.xs,
+  },
+  sectionLabel: {
+    ...typography.caption,
+    color: colors.gray600,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
   },
   navItem: {
     flexDirection: 'row',

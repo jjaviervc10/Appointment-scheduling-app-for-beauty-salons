@@ -26,7 +26,9 @@ import {
   type AuthNextStep,
   getAuthNextStep,
   getOwnerSetupStatus,
+  requestOwnerPasswordReset,
   requestOwnerSetup,
+  verifyOwnerPasswordReset,
   verifyOwnerSetup,
 } from '../../src/services/authApi';
 import { clearSessionExit } from '../../src/utils/sessionExit';
@@ -36,11 +38,15 @@ import {
   toMexicanPhoneForAuthApi,
 } from '../../src/utils/phone';
 
-type OwnerAccessMode = 'loading' | 'error' | 'setup' | 'login';
+type OwnerAccessMode = 'loading' | 'error' | 'setup' | 'login' | 'password_reset';
 type SetupStep = 'phone' | 'verify';
+type PasswordResetStep = 'phone' | 'verify';
 
 const autoSetupRequestKeys = new Set<string>();
 const SETUP_CODE_TTL_MS = 10 * 60 * 1000;
+const PASSWORD_RESET_CODE_TTL_MS = 10 * 60 * 1000;
+const OWNER_PASSWORD_RESET_GENERIC_MESSAGE =
+  'Si el número es válido, recibirás un código por WhatsApp.';
 
 function getStatus(error: unknown): number | undefined {
   return (error as { status?: number } | null)?.status;
@@ -67,38 +73,38 @@ export default function OwnerLoginScreen() {
 
   const [mode, setMode] = useState<OwnerAccessMode>('loading');
   const [setupStep, setSetupStep] = useState<SetupStep>('phone');
+  const [passwordResetStep, setPasswordResetStep] = useState<PasswordResetStep>('phone');
   const [phone, setPhone] = useState(() =>
     typeof params.phone === 'string' ? formatMexicanPhoneForDisplay(params.phone) : '',
   );
   const [setupPhone, setSetupPhone] = useState('');
+  const [passwordResetPhone, setPasswordResetPhone] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRequestingSetupCode, setIsRequestingSetupCode] = useState(false);
+  const [isRequestingPasswordResetCode, setIsRequestingPasswordResetCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<string | null>(null);
+  const [passwordResetNotice, setPasswordResetNotice] = useState<string | null>(null);
   const [setupCodeExpiresAt, setSetupCodeExpiresAt] = useState<number | null>(null);
+  const [passwordResetCodeExpiresAt, setPasswordResetCodeExpiresAt] = useState<number | null>(null);
   const [remainingSetupCodeSeconds, setRemainingSetupCodeSeconds] = useState(0);
-  const [checkedPasskeys, setCheckedPasskeys] = useState(false);
+  const [remainingPasswordResetCodeSeconds, setRemainingPasswordResetCodeSeconds] = useState(0);
+  const [passwordLoginFailed, setPasswordLoginFailed] = useState(false);
+  const [checkedPasskeys, setCheckedPasskeys] = useState(() => !webAuthn.isSupported);
   const autoSetupRequestInFlightRef = useRef(false);
 
   const loadSetupStatus = useCallback(async () => {
-    const ownerModeFromNextStep = getOwnerModeFromNextStep(params.nextStep);
-    if (ownerModeFromNextStep) {
-      setMode(ownerModeFromNextStep);
-      setSetupStep('phone');
-      setError(null);
-      return;
-    }
-
     if (typeof params.phone === 'string' && isValidMexicanPhoneInput(params.phone)) {
+      const authPhone = toMexicanPhoneForAuthApi(params.phone);
       setMode('loading');
       setError(null);
 
       try {
-        const response = await getAuthNextStep(toMexicanPhoneForAuthApi(params.phone));
+        const response = await getAuthNextStep(authPhone);
         const ownerModeFromPhone = getOwnerModeFromNextStep(response.nextStep);
 
         if (ownerModeFromPhone) {
@@ -106,11 +112,25 @@ export default function OwnerLoginScreen() {
           setSetupStep('phone');
           return;
         }
+
+        router.replace({
+          pathname: '/client/login',
+          params: { phone: authPhone },
+        });
+        return;
       } catch {
         setMode('error');
         setError('No se pudo consultar el estado de acceso. Revisa tu conexion e intenta de nuevo.');
         return;
       }
+    }
+
+    const ownerModeFromNextStep = getOwnerModeFromNextStep(params.nextStep);
+    if (ownerModeFromNextStep) {
+      setMode(ownerModeFromNextStep);
+      setSetupStep('phone');
+      setError(null);
+      return;
     }
 
     setMode('loading');
@@ -124,7 +144,7 @@ export default function OwnerLoginScreen() {
       setMode('error');
       setError('No se pudo consultar el estado de acceso. Revisa tu conexion e intenta de nuevo.');
     }
-  }, [params.nextStep, params.phone]);
+  }, [params.nextStep, params.phone, router]);
 
   useEffect(() => {
     void loadSetupStatus();
@@ -151,7 +171,27 @@ export default function OwnerLoginScreen() {
   }, [setupCodeExpiresAt]);
 
   useEffect(() => {
-    if (mode !== 'login') return;
+    if (!passwordResetCodeExpiresAt) {
+      setRemainingPasswordResetCodeSeconds(0);
+      return;
+    }
+
+    const expiresAt = passwordResetCodeExpiresAt;
+
+    function updateRemainingTime() {
+      setRemainingPasswordResetCodeSeconds(
+        Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)),
+      );
+    }
+
+    updateRemainingTime();
+    const intervalId = setInterval(updateRemainingTime, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [passwordResetCodeExpiresAt]);
+
+  useEffect(() => {
+    if (mode !== 'login' && mode !== 'setup' && mode !== 'password_reset') return;
 
     if (webAuthn.isSupported) {
       webAuthn.checkPasskeys().finally(() => setCheckedPasskeys(true));
@@ -166,12 +206,13 @@ export default function OwnerLoginScreen() {
     const passwordVal = password;
 
     if (!isValidMexicanPhoneInput(phone) || !passwordVal) {
-      setError('Ingresa tu telefono y contrasena.');
+      setError('Ingresa tu teléfono y contraseña.');
       return;
     }
 
     setIsSubmitting(true);
     setError(null);
+    setPasswordLoginFailed(false);
 
     try {
       await loginOwner(phoneVal, passwordVal);
@@ -183,8 +224,11 @@ export default function OwnerLoginScreen() {
         setError('Revisa los datos ingresados.');
       } else if (status === 429) {
         setError('Demasiados intentos. Espera antes de reintentar.');
+      } else if (status && status >= 500) {
+        setError('No pudimos iniciar sesión por un problema del servidor. Intenta más tarde.');
       } else {
-        setError('Telefono o contrasena invalidos.');
+        setPasswordLoginFailed(true);
+        setError('No pudimos iniciar sesión con esa contraseña.');
       }
     } finally {
       setIsSubmitting(false);
@@ -205,7 +249,7 @@ export default function OwnerLoginScreen() {
       options?.successMessage ?? 'Te enviamos un código de verificación por WhatsApp.';
 
     if (!isValidMexicanPhoneInput(phone)) {
-      setError('Ingresa tu telefono.');
+      setError('Ingresa tu teléfono.');
       return false;
     }
 
@@ -248,6 +292,8 @@ export default function OwnerLoginScreen() {
         setMode('login');
       } else if (status === 429) {
         setError('Espera unos minutos antes de solicitar otro código.');
+      } else if (status && status >= 500) {
+        setError('No se pudo enviar el código. El servicio de mensajes no está disponible en este momento.');
       } else {
         setError('Revisa los datos ingresados.');
       }
@@ -299,17 +345,17 @@ export default function OwnerLoginScreen() {
     }
 
     if (!/^\d{6}$/.test(codeVal)) {
-      setError('El codigo debe tener exactamente 6 digitos.');
+      setError('El código debe tener exactamente 6 dígitos.');
       return;
     }
 
     if (passwordVal.length < 8) {
-      setError('La contrasena debe tener al menos 8 caracteres.');
+      setError('La contraseña debe tener al menos 8 caracteres.');
       return;
     }
 
     if (passwordVal !== confirmPassword) {
-      setError('La confirmacion de contrasena no coincide.');
+      setError('La confirmación de contraseña no coincide.');
       return;
     }
 
@@ -341,6 +387,125 @@ export default function OwnerLoginScreen() {
     }
   }, [code, password, confirmPassword, setupCodeExpiresAt, setupPhone, setOwnerSession, router]);
 
+  const startPasswordReset = useCallback(() => {
+    setMode('password_reset');
+    setPasswordResetStep('phone');
+    setError(null);
+    setPasswordResetNotice(null);
+    setPasswordResetCodeExpiresAt(null);
+    setCode('');
+    setPassword('');
+    setConfirmPassword('');
+  }, []);
+
+  const handlePasswordResetRequest = useCallback(async () => {
+    if (isSubmitting || isRequestingPasswordResetCode) {
+      return;
+    }
+
+    const phoneVal = toMexicanPhoneForAuthApi(phone);
+
+    if (!isValidMexicanPhoneInput(phone)) {
+      setError('Ingresa tu teléfono.');
+      return;
+    }
+
+    setIsRequestingPasswordResetCode(true);
+    setError(null);
+    setPasswordResetNotice(null);
+    setCode('');
+    setPassword('');
+    setConfirmPassword('');
+
+    try {
+      await requestOwnerPasswordReset(phoneVal);
+      setPasswordResetPhone(phoneVal);
+      setPasswordResetStep('verify');
+      setPasswordResetCodeExpiresAt(Date.now() + PASSWORD_RESET_CODE_TTL_MS);
+      setPasswordResetNotice(OWNER_PASSWORD_RESET_GENERIC_MESSAGE);
+    } catch (err: unknown) {
+      const status = getStatus(err);
+      if (status === 401) {
+        setError('No pudimos autorizar la solicitud. Vuelve a intentar.');
+      } else if (status === 429) {
+        setError('Demasiados intentos. Espera unos minutos.');
+      } else if (status && status >= 500) {
+        setError('No pudimos enviar el código por un problema del servidor.');
+      } else if (!status) {
+        setError('No pudimos conectar con el backend. Revisa tu conexión e intenta nuevamente.');
+      } else {
+        setError('No pudimos solicitar el código. Intenta nuevamente.');
+      }
+    } finally {
+      setIsRequestingPasswordResetCode(false);
+    }
+  }, [isRequestingPasswordResetCode, isSubmitting, phone]);
+
+  const handlePasswordResetVerify = useCallback(async () => {
+    const codeVal = code.trim();
+    const passwordVal = password;
+
+    if (passwordResetCodeExpiresAt && Date.now() >= passwordResetCodeExpiresAt) {
+      setError('Código inválido o expirado.');
+      return;
+    }
+
+    if (!/^\d{6}$/.test(codeVal)) {
+      setError('El código debe tener exactamente 6 dígitos.');
+      return;
+    }
+
+    if (passwordVal.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (passwordVal !== confirmPassword) {
+      setError('La confirmación de contraseña no coincide.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setPasswordResetNotice(null);
+
+    try {
+      const session = await verifyOwnerPasswordReset(passwordResetPhone, codeVal, passwordVal);
+      await setOwnerSession(session.token, session.owner, session.expiresAt);
+      clearSessionExit();
+      setCode('');
+      setPassword('');
+      setConfirmPassword('');
+      setPasswordResetPhone('');
+      setPasswordResetNotice(null);
+      setPasswordResetCodeExpiresAt(null);
+      router.replace('/owner/dashboard');
+    } catch (err: unknown) {
+      const status = getStatus(err);
+      if (status === 401) {
+        setError('Código inválido o expirado.');
+      } else if (status === 429) {
+        setError('Demasiados intentos. Espera unos minutos.');
+      } else if (status && status >= 500) {
+        setError('No pudimos guardar la nueva contraseña por un problema del servidor.');
+      } else if (!status) {
+        setError('No pudimos conectar con el backend. Revisa tu conexión e intenta nuevamente.');
+      } else {
+        setError('No pudimos completar la recuperación. Revisa los datos.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [
+    code,
+    confirmPassword,
+    password,
+    passwordResetCodeExpiresAt,
+    passwordResetPhone,
+    router,
+    setOwnerSession,
+  ]);
+
   const handlePasskeyLogin = useCallback(async () => {
     setError(null);
     try {
@@ -361,13 +526,40 @@ export default function OwnerLoginScreen() {
     setError(null);
   }, []);
 
+  const goBackToPasswordResetPhone = useCallback(() => {
+    setPasswordResetStep('phone');
+    setCode('');
+    setPassword('');
+    setConfirmPassword('');
+    setPasswordResetNotice(null);
+    setPasswordResetCodeExpiresAt(null);
+    setError(null);
+  }, []);
+
+  const goBackToLogin = useCallback(() => {
+    setMode('login');
+    setPasswordResetStep('phone');
+    setCode('');
+    setPassword('');
+    setConfirmPassword('');
+    setPasswordResetNotice(null);
+    setPasswordResetCodeExpiresAt(null);
+    setError(null);
+  }, []);
+
   const showPasskeyButton =
-    mode === 'login' &&
+    (mode === 'login' ||
+      (mode === 'setup' && setupStep === 'phone') ||
+      (mode === 'password_reset' && passwordResetStep === 'phone')) &&
     checkedPasskeys &&
     webAuthn.isSupported &&
     webAuthn.hasPasskeys === true;
 
-  const displayError = error ?? (mode === 'login' ? webAuthn.error : null);
+  const displayError =
+    error ??
+    ((mode === 'login' || mode === 'setup' || mode === 'password_reset')
+      ? webAuthn.error
+      : null);
   const isSetupCodeExpired =
     mode === 'setup' &&
     setupStep === 'verify' &&
@@ -383,11 +575,75 @@ export default function OwnerLoginScreen() {
     params.nextStep === 'owner_setup' && isValidMexicanPhoneInput(phone)
       ? 'Reintentar envío de código'
       : 'Enviar código';
-  const isBusy = isSubmitting || isRequestingSetupCode;
-  const primaryActionDisabled = isBusy || isSetupCodeExpired;
+  const isPasswordResetCodeExpired =
+    mode === 'password_reset' &&
+    passwordResetStep === 'verify' &&
+    passwordResetCodeExpiresAt !== null &&
+    remainingPasswordResetCodeSeconds <= 0;
+  const isPasswordResetPhoneStep = mode === 'password_reset' && passwordResetStep === 'phone';
+  const isPasswordResetVerifyStep = mode === 'password_reset' && passwordResetStep === 'verify';
+  const isPasswordResetVerifyReady =
+    /^\d{6}$/.test(code.trim()) &&
+    password.length >= 8 &&
+    password === confirmPassword;
+  const isPasswordResetActionBlocked =
+    (isPasswordResetPhoneStep && !isValidMexicanPhoneInput(phone)) ||
+    (isPasswordResetVerifyStep && !isPasswordResetVerifyReady);
+  const passwordResetCodeTimerText =
+    mode === 'password_reset' && passwordResetStep === 'verify' && passwordResetCodeExpiresAt !== null
+      ? isPasswordResetCodeExpired
+        ? 'El código venció. Solicita uno nuevo.'
+        : `El código vence en ${formatRemainingTime(remainingPasswordResetCodeSeconds)}`
+      : null;
+  const isBusy = isSubmitting || isRequestingSetupCode || isRequestingPasswordResetCode;
+  const primaryActionDisabled =
+    isBusy || isSetupCodeExpired || isPasswordResetCodeExpired || isPasswordResetActionBlocked;
   const isPrimaryActionLoading =
-    isSubmitting || (mode === 'setup' && setupStep === 'phone' && isRequestingSetupCode);
+    isSubmitting ||
+    (mode === 'setup' && setupStep === 'phone' && isRequestingSetupCode) ||
+    (mode === 'password_reset' &&
+      passwordResetStep === 'phone' &&
+      isRequestingPasswordResetCode);
   const setupFieldsEditable = !isBusy;
+  const passwordResetFieldsEditable = !isBusy;
+  const headerIcon =
+    mode === 'setup'
+      ? 'shield-checkmark-outline'
+      : mode === 'password_reset'
+        ? 'refresh-circle-outline'
+        : 'key-outline';
+  const headerTitle =
+    mode === 'setup'
+      ? 'Configurar acceso de duena'
+      : mode === 'password_reset'
+        ? 'Recuperar contraseña'
+        : 'Panel del estudio';
+  const headerSubtitle =
+    mode === 'setup'
+      ? 'Crea tu contraseña con verificación por WhatsApp'
+      : mode === 'password_reset'
+        ? 'Crea una nueva contraseña con código por WhatsApp'
+        : 'Acceso exclusivo para la propietaria';
+  const primaryAction =
+    mode === 'setup'
+      ? setupStep === 'phone'
+        ? handleSetupRequest
+        : handleSetupVerify
+      : mode === 'password_reset'
+        ? passwordResetStep === 'phone'
+          ? handlePasswordResetRequest
+          : handlePasswordResetVerify
+        : handleLogin;
+  const primaryActionLabel =
+    mode === 'setup'
+      ? setupStep === 'phone'
+        ? setupRequestButtonLabel
+        : 'Configurar acceso'
+      : mode === 'password_reset'
+        ? passwordResetStep === 'phone'
+          ? 'Enviar código'
+          : 'Guardar nueva contraseña'
+        : 'Iniciar sesión';
 
   return (
     <KeyboardAvoidingView
@@ -402,16 +658,10 @@ export default function OwnerLoginScreen() {
       >
         <View style={styles.header}>
           <View style={styles.iconCircle}>
-            <Ionicons name={mode === 'setup' ? 'shield-checkmark-outline' : 'key-outline'} size={36} color={colors.gold} />
+            <Ionicons name={headerIcon} size={36} color={colors.gold} />
           </View>
-          <Text style={styles.title}>
-            {mode === 'setup' ? 'Configurar acceso de duena' : 'Panel del estudio'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {mode === 'setup'
-              ? 'Crea tu contrasena con verificacion por WhatsApp'
-              : 'Acceso exclusivo para la propietaria'}
-          </Text>
+          <Text style={styles.title}>{headerTitle}</Text>
+          <Text style={styles.subtitle}>{headerSubtitle}</Text>
         </View>
 
         {mode === 'loading' ? (
@@ -437,7 +687,53 @@ export default function OwnerLoginScreen() {
           </View>
         ) : (
           <View style={styles.form}>
-            {mode === 'setup' && setupStep === 'verify' ? (
+            {mode === 'password_reset' && passwordResetStep === 'verify' ? (
+              <>
+                <View style={styles.infoBox}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.info} />
+                  <View style={styles.infoTextBlock}>
+                    <Text style={styles.infoText}>
+                      {passwordResetNotice ?? OWNER_PASSWORD_RESET_GENERIC_MESSAGE}
+                    </Text>
+                    {passwordResetCodeTimerText ? (
+                      <Text style={isPasswordResetCodeExpired ? styles.expiredText : styles.timerText}>
+                        {passwordResetCodeTimerText}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                <Field
+                  icon="keypad-outline"
+                  label="Código de 6 dígitos"
+                  value={code}
+                  onChangeText={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="123456"
+                  keyboardType="number-pad"
+                  editable={passwordResetFieldsEditable}
+                  onSubmitEditing={handlePasswordResetVerify}
+                />
+
+                <PasswordField
+                  label="Nueva contraseña"
+                  value={password}
+                  onChangeText={setPassword}
+                  showPassword={showPassword}
+                  onTogglePassword={() => setShowPassword((value) => !value)}
+                  editable={passwordResetFieldsEditable}
+                />
+
+                <PasswordField
+                  label="Confirmar contraseña"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  showPassword={showPassword}
+                  onTogglePassword={() => setShowPassword((value) => !value)}
+                  editable={passwordResetFieldsEditable}
+                  onSubmitEditing={handlePasswordResetVerify}
+                />
+              </>
+            ) : mode === 'setup' && setupStep === 'verify' ? (
               <>
                 <View style={styles.infoBox}>
                   <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.info} />
@@ -465,7 +761,7 @@ export default function OwnerLoginScreen() {
                 />
 
                 <PasswordField
-                  label="Nueva contrasena"
+                  label="Nueva contraseña"
                   value={password}
                   onChangeText={setPassword}
                   showPassword={showPassword}
@@ -474,7 +770,7 @@ export default function OwnerLoginScreen() {
                 />
 
                 <PasswordField
-                  label="Confirmar contrasena"
+                  label="Confirmar contraseña"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   showPassword={showPassword}
@@ -493,7 +789,13 @@ export default function OwnerLoginScreen() {
                   placeholder="+52 614 215 4006"
                   keyboardType="phone-pad"
                   editable={!isBusy}
-                  onSubmitEditing={mode === 'setup' ? handleSetupRequest : undefined}
+                  onSubmitEditing={
+                    mode === 'setup'
+                      ? handleSetupRequest
+                      : mode === 'password_reset'
+                        ? handlePasswordResetRequest
+                        : undefined
+                  }
                   accessibilityLabel="Telefono de la propietaria"
                 />
 
@@ -520,36 +822,86 @@ export default function OwnerLoginScreen() {
 
             <TouchableOpacity
               style={[styles.loginButton, primaryActionDisabled && styles.buttonDisabled]}
-              onPress={
-                mode === 'setup'
-                  ? setupStep === 'phone'
-                    ? handleSetupRequest
-                    : handleSetupVerify
-                  : handleLogin
-              }
+              onPress={primaryAction}
               disabled={primaryActionDisabled}
               activeOpacity={0.8}
               accessibilityRole="button"
-              accessibilityLabel={
-                mode === 'setup'
-                  ? setupStep === 'phone'
-                    ? setupRequestButtonLabel
-                    : 'Configurar acceso'
-                  : 'Iniciar sesion'
-              }
+              accessibilityLabel={primaryActionLabel}
             >
               {isPrimaryActionLoading ? (
                 <ActivityIndicator size="small" color={colors.black} />
               ) : (
-                <Text style={styles.loginButtonText}>
-                  {mode === 'setup'
-                    ? setupStep === 'phone'
-                      ? setupRequestButtonLabel
-                      : 'Configurar acceso'
-                    : 'Iniciar sesion'}
-                </Text>
+                <Text style={styles.loginButtonText}>{primaryActionLabel}</Text>
               )}
             </TouchableOpacity>
+
+            {mode === 'login' ? (
+              <>
+                {passwordLoginFailed ? (
+                  <Text style={styles.recoveryHint}>
+                    Si no tienes contraseña o no la recuerdas, puedes crear una nueva con WhatsApp.
+                  </Text>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.backLink}
+                  onPress={startPasswordReset}
+                  accessibilityRole="button"
+                  accessibilityLabel="Recuperar contraseña"
+                  disabled={isBusy}
+                >
+                  <Ionicons name="refresh-outline" size={16} color={colors.gold} />
+                  <Text style={styles.resendLinkText}>
+                    {passwordLoginFailed ? 'Crear nueva contraseña' : 'Recuperar contraseña'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
+            {mode === 'password_reset' && passwordResetStep === 'verify' ? (
+              <>
+                <TouchableOpacity
+                  style={styles.backLink}
+                  onPress={handlePasswordResetRequest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reenviar código"
+                  disabled={isBusy}
+                >
+                  {isRequestingPasswordResetCode ? (
+                    <ActivityIndicator size="small" color={colors.gold} />
+                  ) : (
+                    <Ionicons name="refresh-outline" size={16} color={colors.gold} />
+                  )}
+                  <Text style={styles.resendLinkText}>
+                    {isRequestingPasswordResetCode ? 'Reenviando...' : 'Reenviar código'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.backLink}
+                  onPress={goBackToPasswordResetPhone}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver a teléfono"
+                  disabled={isBusy}
+                >
+                  <Ionicons name="arrow-back-outline" size={16} color={colors.gray500} />
+                  <Text style={styles.backLinkText}>Volver al teléfono</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
+            {mode === 'password_reset' ? (
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={goBackToLogin}
+                accessibilityRole="button"
+                accessibilityLabel="Volver a iniciar sesión"
+                disabled={isBusy}
+              >
+                <Ionicons name="log-in-outline" size={16} color={colors.gray500} />
+                <Text style={styles.backLinkText}>Volver a iniciar sesión</Text>
+              </TouchableOpacity>
+            ) : null}
 
             {mode === 'setup' && setupStep === 'verify' ? (
               <>
@@ -574,11 +926,11 @@ export default function OwnerLoginScreen() {
                   style={styles.backLink}
                   onPress={goBackToSetupPhone}
                   accessibilityRole="button"
-                  accessibilityLabel="Volver a telefono"
+                  accessibilityLabel="Volver a teléfono"
                   disabled={isBusy}
                 >
                   <Ionicons name="arrow-back-outline" size={16} color={colors.gray500} />
-                  <Text style={styles.backLinkText}>Volver al telefono</Text>
+                  <Text style={styles.backLinkText}>Volver al teléfono</Text>
                 </TouchableOpacity>
               </>
             ) : null}
@@ -716,7 +1068,7 @@ function PasswordField({
           onPress={onTogglePassword}
           style={styles.eyeButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityLabel={showPassword ? 'Ocultar contrasena' : 'Mostrar contrasena'}
+          accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
         >
           <Ionicons
             name={showPassword ? 'eye-off-outline' : 'eye-outline'}
@@ -803,8 +1155,7 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 16,
     paddingVertical: spacing.sm,
-    outlineStyle: 'none',
-  } as any,
+  },
   inputFlex: {
     flex: 1,
   },
@@ -898,6 +1249,12 @@ const styles = StyleSheet.create({
     color: colors.gold,
     fontSize: 15,
     fontWeight: '600',
+  },
+  recoveryHint: {
+    color: colors.gray500,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   backLink: {
     flexDirection: 'row',

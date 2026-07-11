@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Sidebar, SidebarRoute } from './Sidebar';
-import { colors, spacing, typography, radii } from '../../theme';
+import { OwnerModuleSwitcher } from './OwnerModuleSwitcher';
+import { colors, spacing } from '../../theme';
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -28,6 +29,11 @@ export function AppLayout({ children, activeRoute, onNavigate, onLogout }: AppLa
   if (isMobile) {
     return (
       <View style={styles.mobileContainer}>
+        <OwnerModuleSwitcher
+          activeRoute={activeRoute}
+          onNavigate={onNavigate}
+          onLogout={onLogout}
+        />
         <View style={styles.mobileMain}>{children}</View>
         <View style={styles.bottomBar}>
           {BOTTOM_TABS.map((tab) => {
@@ -50,14 +56,6 @@ export function AppLayout({ children, activeRoute, onNavigate, onLogout }: AppLa
               </TouchableOpacity>
             );
           })}
-          <TouchableOpacity
-            style={styles.bottomTab}
-            onPress={onLogout}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="log-out-outline" size={22} color={colors.error} />
-            <Text style={[styles.bottomLabel, { color: colors.error }]}>Salir</Text>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -74,7 +72,6 @@ export function AppLayout({ children, activeRoute, onNavigate, onLogout }: AppLa
 }
 
 const styles = StyleSheet.create({
-  /* Desktop */
   container: {
     flex: 1,
     flexDirection: 'row',
@@ -84,7 +81,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.black,
   },
-  /* Mobile */
   mobileContainer: {
     flex: 1,
     backgroundColor: colors.black,
