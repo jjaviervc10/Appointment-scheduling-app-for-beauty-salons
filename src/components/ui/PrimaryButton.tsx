@@ -44,6 +44,7 @@ export function PrimaryButton({ label, onPress, style, disabled, loading, icon }
 const styles = StyleSheet.create({
   button: {
     flex: 1,
+    minHeight: 44,
     backgroundColor: colors.gold,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.xl,

@@ -6,50 +6,62 @@ import { TopHeader } from '../../src/components/layout/TopHeader';
 import { LoadingState } from '../../src/components/ui/LoadingState';
 import { PrimaryButton } from '../../src/components/ui/PrimaryButton';
 import { InstagramProfileCard } from '../../src/components/instagram/InstagramProfileCard';
-import { InstagramPublishingLimitCard } from '../../src/components/instagram/InstagramPublishingLimitCard';
 import { InstagramMediaList } from '../../src/components/instagram/InstagramMediaList';
 import { InstagramCreateContainerForm } from '../../src/components/instagram/InstagramCreateContainerForm';
 import { InstagramPublishConfirmModal } from '../../src/components/instagram/InstagramPublishConfirmModal';
 import { useInstagram } from '../../src/hooks/use-instagram';
+import { useMarketingMedia } from '../../src/hooks/use-marketing-media';
 
 export default function MarketingScreen() {
   const {
     profileState,
     mediaState,
     limitState,
-    creationId,
-    containerLoading,
-    containerError,
     publishLoading,
     publishError,
     publishSuccess,
-    publishedId,
     loadAll,
     loadProfile,
     loadMedia,
     loadPublishingLimit,
-    createContainer,
     publish,
-    resetContainer,
   } = useInstagram();
+  const {
+    selectedMedia,
+    preparedCreationId,
+    uploadLoading,
+    isGenerating,
+    isEditing,
+    prepareLoading,
+    error: marketingMediaError,
+    uploadMedia,
+    generateMedia,
+    editMedia,
+    listMedia: listMarketingMedia,
+    prepareInstagramMedia,
+    resetMediaFlow,
+  } = useMarketingMedia();
 
   const [refreshing, setRefreshing] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
 
   useEffect(() => {
     void loadAll();
-  }, [loadAll]);
+    void listMarketingMedia();
+  }, [listMarketingMedia, loadAll]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await loadAll();
+    await Promise.all([loadAll(), listMarketingMedia()]);
     setRefreshing(false);
   };
 
   const handlePublishConfirm = async () => {
-    const published = await publish();
+    if (!preparedCreationId) return;
+    const published = await publish(preparedCreationId);
     if (published) {
       setConfirmVisible(false);
+      resetMediaFlow();
     }
   };
 
@@ -61,10 +73,7 @@ export default function MarketingScreen() {
   if (isInitialLoading) {
     return (
       <View style={styles.loadingScreen}>
-        <TopHeader
-          title="Instagram"
-          subtitle="Administra la presencia de tu negocio en Instagram."
-        />
+        <TopHeader title="Instagram" />
         <LoadingState />
       </View>
     );
@@ -72,10 +81,7 @@ export default function MarketingScreen() {
 
   return (
     <View style={styles.screen}>
-      <TopHeader
-        title="Instagram"
-        subtitle="Administra la presencia de tu negocio en Instagram."
-      />
+      <TopHeader title="Instagram" />
 
       <ScrollView
         style={styles.scroll}
@@ -89,63 +95,71 @@ export default function MarketingScreen() {
           />
         }
       >
-        {profileState.status === 'idle' || profileState.status === 'loading' ? (
-          <SectionLoader label="Cargando perfil..." />
+        {profileState.status === 'idle' ||
+        profileState.status === 'loading' ||
+        limitState.status === 'idle' ||
+        limitState.status === 'loading' ? (
+          <SectionLoader label="Cargando estado de Instagram..." />
         ) : null}
         {profileState.status === 'error' ? (
-          <SectionError message={profileState.message} onRetry={loadProfile} />
-        ) : null}
-        {profileState.status === 'success' ? (
-          <InstagramProfileCard profile={profileState.data} />
-        ) : null}
-
-        {limitState.status === 'idle' || limitState.status === 'loading' ? (
-          <SectionLoader label="Cargando cuota..." />
+          <SectionError
+            title="No pudimos cargar la cuenta de Instagram"
+            message={profileState.message}
+            onRetry={loadProfile}
+          />
         ) : null}
         {limitState.status === 'error' ? (
-          <SectionError message={limitState.message} onRetry={loadPublishingLimit} />
+          <SectionError
+            title="No pudimos cargar la cuota"
+            message={limitState.message}
+            onRetry={loadPublishingLimit}
+          />
         ) : null}
-        {limitState.status === 'success' ? (
-          <InstagramPublishingLimitCard limit={limitState.data} />
-        ) : null}
-
-        {mediaState.status === 'idle' || mediaState.status === 'loading' ? (
-          <SectionLoader label="Cargando publicaciones..." />
-        ) : null}
-        {mediaState.status === 'error' ? (
-          <SectionError message={mediaState.message} onRetry={() => void loadMedia()} />
-        ) : null}
-        {mediaState.status === 'success' ? (
-          <InstagramMediaList items={mediaState.data} />
+        {profileState.status === 'success' ? (
+          <InstagramProfileCard
+            profile={profileState.data}
+            limit={limitState.status === 'success' ? limitState.data : null}
+          />
         ) : null}
 
         {publishSuccess ? (
           <View style={styles.successBanner}>
             <Ionicons name="checkmark-circle" size={20} color={colors.success} />
             <Text style={styles.successText}>
-              Publicacion realizada con exito en Instagram{publishedId ? `: ${publishedId}` : ''}.
+              Publicacion realizada con exito en Instagram.
             </Text>
           </View>
         ) : null}
 
         <InstagramCreateContainerForm
-          loading={containerLoading}
-          error={containerError}
-          creationId={creationId}
-          onSubmit={(imageUrl, caption) => void createContainer(imageUrl, caption)}
-          onReset={resetContainer}
+          uploadLoading={uploadLoading}
+          prepareLoading={prepareLoading}
+          error={marketingMediaError}
+          selectedMedia={selectedMedia}
+          preparedCreationId={preparedCreationId}
+          publishLoading={publishLoading}
+          onUpload={(file, caption) => void uploadMedia(file, caption)}
+          onGenerate={(payload) => void generateMedia(payload)}
+          onEdit={(payload) => void editMedia(payload)}
+          onPrepare={() => void prepareInstagramMedia(selectedMedia?.mediaId)}
+          onPublish={() => setConfirmVisible(true)}
+          onReset={resetMediaFlow}
+          isGenerating={isGenerating}
+          isEditing={isEditing}
         />
 
-        {creationId ? (
-          <View style={styles.publishRow}>
-            <PrimaryButton
-              label="Publicar en Instagram"
-              onPress={() => setConfirmVisible(true)}
-              disabled={publishLoading}
-              loading={publishLoading}
-              icon="paper-plane-outline"
-            />
-          </View>
+        {mediaState.status === 'idle' || mediaState.status === 'loading' ? (
+          <SectionLoader label="Cargando publicaciones..." />
+        ) : null}
+        {mediaState.status === 'error' ? (
+          <SectionError
+            title="No pudimos cargar publicaciones recientes"
+            message={mediaState.message}
+            onRetry={() => void loadMedia()}
+          />
+        ) : null}
+        {mediaState.status === 'success' ? (
+          <InstagramMediaList items={mediaState.data} initialVisibleCount={3} />
         ) : null}
 
         <View style={styles.bottomPad} />
@@ -172,14 +186,16 @@ function SectionLoader({ label }: { label: string }) {
 }
 
 interface SectionErrorProps {
+  title?: string;
   message: string;
   onRetry: () => void;
 }
 
-function SectionError({ message, onRetry }: SectionErrorProps) {
+function SectionError({ title = 'No pudimos cargar esta seccion', message, onRetry }: SectionErrorProps) {
   return (
     <View style={styles.errorCard}>
       <Ionicons name="alert-circle-outline" size={20} color={colors.error} />
+      <Text style={styles.errorTitle}>{title}</Text>
       <Text style={styles.errorText}>{message}</Text>
       <PrimaryButton
         label="Reintentar"
@@ -194,14 +210,15 @@ function SectionError({ message, onRetry }: SectionErrorProps) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.black,
   },
   loadingScreen: {
     flex: 1,
-    backgroundColor: colors.gray100,
+    backgroundColor: colors.black,
   },
   scroll: {
     flex: 1,
+    backgroundColor: colors.black,
   },
   content: {
     padding: spacing.lg,
@@ -235,6 +252,12 @@ const styles = StyleSheet.create({
     color: colors.error,
     textAlign: 'center',
   },
+  errorTitle: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   retryBtn: {
     marginTop: spacing.xs,
   },
@@ -252,9 +275,6 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.success,
     flex: 1,
-  },
-  publishRow: {
-    marginTop: spacing.sm,
   },
   bottomPad: {
     height: spacing.xxl,

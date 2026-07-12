@@ -26,10 +26,19 @@ export function setOnUnauthorized(
   onUnauthorizedCallback = callback;
 }
 
-async function buildHeaders(auth: ApiAuthMode): Promise<Record<string, string>> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
+function isFormDataBody(body: unknown): body is FormData {
+  return typeof FormData !== 'undefined' && body instanceof FormData;
+}
+
+async function buildHeaders(
+  auth: ApiAuthMode,
+  contentType: 'json' | 'multipart',
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+
+  if (contentType === 'json') {
+    headers['Content-Type'] = 'application/json';
+  }
 
   if (auth !== 'none') {
     const token = auth === 'owner'
@@ -117,6 +126,12 @@ export async function apiRequest<T>(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const requestUrl = `${API_BASE_URL}${path}`;
+  const isMultipart = isFormDataBody(body);
+  const requestBody = body === undefined
+    ? undefined
+    : isMultipart
+      ? body
+      : JSON.stringify(body);
 
   console.info('[API REQUEST]', {
     endpoint: path,
@@ -129,8 +144,8 @@ export async function apiRequest<T>(
   try {
     const response = await fetch(requestUrl, {
       method,
-      headers: await buildHeaders(auth),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: await buildHeaders(auth, isMultipart ? 'multipart' : 'json'),
+      body: requestBody,
       signal: controller.signal,
     });
 

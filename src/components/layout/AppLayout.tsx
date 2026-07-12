@@ -100,6 +100,7 @@ const styles = StyleSheet.create({
   },
   bottomTab: {
     flex: 1,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,

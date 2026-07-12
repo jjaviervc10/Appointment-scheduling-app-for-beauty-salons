@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import {
-  createInstagramMediaContainer,
   getInstagramMedia,
   getInstagramProfile,
   getInstagramPublishingLimit,
@@ -69,9 +68,6 @@ export function useInstagram() {
   const [profileState, setProfileState] = useState<InstagramAsyncState<InstagramProfile>>({ status: 'idle' });
   const [mediaState, setMediaState] = useState<InstagramAsyncState<InstagramMediaItem[]>>({ status: 'idle' });
   const [limitState, setLimitState] = useState<InstagramAsyncState<InstagramPublishingLimit>>({ status: 'idle' });
-  const [creationId, setCreationId] = useState<string | null>(null);
-  const [containerLoading, setContainerLoading] = useState(false);
-  const [containerError, setContainerError] = useState<string | null>(null);
   const [publishLoading, setPublishLoading] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishSuccess, setPublishSuccess] = useState(false);
@@ -111,27 +107,7 @@ export function useInstagram() {
     await Promise.all([loadProfile(), loadMedia(), loadPublishingLimit()]);
   }, [loadProfile, loadMedia, loadPublishingLimit]);
 
-  const createContainer = useCallback(async (imageUrl: string, caption: string) => {
-    setContainerLoading(true);
-    setContainerError(null);
-    setPublishError(null);
-    setPublishSuccess(false);
-    setPublishedId(null);
-    setCreationId(null);
-    try {
-      const result = await createInstagramMediaContainer({
-        imageUrl,
-        caption: caption.trim() || undefined,
-      });
-      setCreationId(result.creationId);
-    } catch (error) {
-      setContainerError(mapError(error));
-    } finally {
-      setContainerLoading(false);
-    }
-  }, []);
-
-  const publish = useCallback(async (): Promise<boolean> => {
+  const publish = useCallback(async (creationId: string): Promise<boolean> => {
     if (!creationId) return false;
     setPublishLoading(true);
     setPublishError(null);
@@ -141,7 +117,6 @@ export function useInstagram() {
       const result = await publishInstagramMedia({ creationId });
       setPublishSuccess(true);
       setPublishedId(result.id);
-      setCreationId(null);
       await loadMedia();
       return true;
     } catch (error) {
@@ -150,23 +125,12 @@ export function useInstagram() {
     } finally {
       setPublishLoading(false);
     }
-  }, [creationId, loadMedia]);
-
-  const resetContainer = useCallback(() => {
-    setCreationId(null);
-    setContainerError(null);
-    setPublishError(null);
-    setPublishSuccess(false);
-    setPublishedId(null);
-  }, []);
+  }, [loadMedia]);
 
   return {
     profileState,
     mediaState,
     limitState,
-    creationId,
-    containerLoading,
-    containerError,
     publishLoading,
     publishError,
     publishSuccess,
@@ -175,8 +139,6 @@ export function useInstagram() {
     loadMedia,
     loadPublishingLimit,
     loadAll,
-    createContainer,
     publish,
-    resetContainer,
   };
 }

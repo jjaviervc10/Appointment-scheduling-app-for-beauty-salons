@@ -138,6 +138,7 @@ const styles = StyleSheet.create({
   },
   btn: {
     flex: 1,
+    minHeight: 44,
     paddingVertical: spacing.md,
     borderRadius: radii.md,
     flexDirection: 'row',

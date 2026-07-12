@@ -44,19 +44,6 @@ export interface InstagramPublishingLimitResponse {
   publishingLimit: InstagramPublishingLimit;
 }
 
-export interface InstagramCreateContainerInput {
-  imageUrl: string;
-  caption?: string;
-}
-
-export interface InstagramCreateContainerResult {
-  creationId: string;
-}
-
-export interface InstagramCreateContainerResponse extends InstagramCreateContainerResult {
-  ok: true;
-}
-
 export interface InstagramPublishInput {
   creationId: string;
 }

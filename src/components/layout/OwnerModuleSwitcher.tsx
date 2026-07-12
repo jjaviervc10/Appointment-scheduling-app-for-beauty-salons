@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   moduleButton: {
-    minHeight: 34,
+    minHeight: 44,
     borderRadius: radii.full,
     borderWidth: 1,
     borderColor: colors.gray700,
@@ -136,9 +136,9 @@ const styles = StyleSheet.create({
     color: colors.gold,
   },
   logoutButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: colors.gray700,
     alignItems: 'center',
@@ -175,6 +175,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     borderRadius: radii.md,
     padding: spacing.md,
+    minHeight: 44,
   },
   optionActive: {
     backgroundColor: colors.gold + '14',

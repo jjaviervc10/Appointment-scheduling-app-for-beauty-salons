@@ -1,8 +1,5 @@
 import { apiRequest } from './apiClient';
 import type {
-  InstagramCreateContainerInput,
-  InstagramCreateContainerResponse,
-  InstagramCreateContainerResult,
   InstagramMediaItem,
   InstagramMediaResponse,
   InstagramProfile,
@@ -36,20 +33,6 @@ export async function getInstagramPublishingLimit(): Promise<InstagramPublishing
     { auth: 'owner' },
   );
   return response.publishingLimit;
-}
-
-export async function createInstagramMediaContainer(
-  input: InstagramCreateContainerInput,
-): Promise<InstagramCreateContainerResult> {
-  const response = await apiRequest<InstagramCreateContainerResponse>(
-    '/api/owner/instagram/media-container',
-    {
-      method: 'POST',
-      auth: 'owner',
-      body: input,
-    },
-  );
-  return { creationId: response.creationId };
 }
 
 export async function publishInstagramMedia(

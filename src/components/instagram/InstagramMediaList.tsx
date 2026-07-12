@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SectionCard } from '../ui/SectionCard';
@@ -7,7 +7,10 @@ import type { InstagramMediaItem, InstagramMediaType } from '../../types/instagr
 
 interface Props {
   items: InstagramMediaItem[];
+  initialVisibleCount?: number;
 }
+
+const DEFAULT_VISIBLE_COUNT = 3;
 
 const MEDIA_TYPE_LABELS: Record<InstagramMediaType, string> = {
   IMAGE: 'Imagen',
@@ -81,17 +84,47 @@ function MediaRow({ item }: { item: InstagramMediaItem }) {
   );
 }
 
-export function InstagramMediaList({ items }: Props) {
+export function InstagramMediaList({
+  items,
+  initialVisibleCount = DEFAULT_VISIBLE_COUNT,
+}: Props) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleItems = useMemo(
+    () => expanded ? items : items.slice(0, initialVisibleCount),
+    [expanded, initialVisibleCount, items],
+  );
+  const canExpand = items.length > initialVisibleCount;
+
   return (
     <SectionCard title="Publicaciones recientes">
       {items.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="images-outline" size={32} color={colors.gray600} />
-          <Text style={styles.emptyText}>No hay publicaciones recientes</Text>
+          <Text style={styles.emptyTitle}>Aun no hay publicaciones recientes</Text>
+          <Text style={styles.emptyText}>
+            Cuando Instagram tenga contenido disponible, aparecera aqui.
+          </Text>
         </View>
       ) : (
         <View>
-          {items.map((item, index) => (
+          <View style={styles.listHeader}>
+            <Text style={styles.listSummary}>
+              {expanded ? `${items.length} publicaciones` : '3 ultimas publicaciones'}
+            </Text>
+            {canExpand ? (
+              <TouchableOpacity
+                style={styles.showAllBtn}
+                onPress={() => setExpanded((value) => !value)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel={expanded ? 'Ver menos publicaciones' : 'Ver todas las publicaciones'}
+              >
+                <Text style={styles.showAllText}>{expanded ? 'Ver menos' : 'Ver todas'}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {visibleItems.map((item, index) => (
             <React.Fragment key={item.id}>
               {index > 0 && <View style={styles.divider} />}
               <MediaRow item={item} />
@@ -109,6 +142,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: spacing.sm,
     gap: spacing.sm,
+    minHeight: 44,
   },
   mediaIcon: {
     width: 36,
@@ -149,8 +183,12 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   linkBtn: {
-    padding: spacing.xs,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   divider: {
     height: 1,
@@ -161,8 +199,37 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xl,
     gap: spacing.sm,
   },
-  emptyText: {
+  emptyTitle: {
     ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  emptyText: {
+    ...typography.caption,
     color: colors.gray500,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  listHeader: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  listSummary: {
+    ...typography.caption,
+    color: colors.gray500,
+  },
+  showAllBtn: {
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
+    justifyContent: 'center',
+  },
+  showAllText: {
+    ...typography.buttonSmall,
+    color: colors.gold,
   },
 });
