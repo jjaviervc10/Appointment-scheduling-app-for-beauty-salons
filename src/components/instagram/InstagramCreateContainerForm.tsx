@@ -1,23 +1,34 @@
 import React, { useEffect, useState } from 'react';
 import {
   Image,
+  Linking,
   Platform,
   Text,
   TextInput,
   TouchableOpacity,
   View,
   StyleSheet,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SectionCard } from '../ui/SectionCard';
 import { PrimaryButton } from '../ui/PrimaryButton';
+import { InstagramPostPreview } from './InstagramPostPreview';
+import {
+  MARKETING_WHATSAPP_DEFAULT_MESSAGE,
+  MARKETING_WHATSAPP_PHONE,
+} from '../../config/marketing';
+import { buildWhatsAppLink } from '../../utils/whatsapp';
 import { colors, spacing, typography, radii } from '../../theme';
 import type {
   EditMarketingMediaRequest,
   GenerateMarketingMediaRequest,
   MarketingMediaMimeType,
+  MarketingMediaHumanError,
   MarketingMediaResult,
   MarketingMediaUploadFile,
+  InstagramPublishDestination,
+  PrepareInstagramOptions,
 } from '../../types/marketing-media.types';
 import {
   MARKETING_MEDIA_ALLOWED_MIME_TYPES,
@@ -31,14 +42,17 @@ interface Props {
   isEditing: boolean;
   prepareLoading: boolean;
   error: string | null;
+  prepareError: MarketingMediaHumanError | null;
   selectedMedia: MarketingMediaResult | null;
   preparedCreationId: string | null;
   publishLoading: boolean;
   onUpload: (file: MarketingMediaUploadFile, caption: string) => void;
   onGenerate: (payload: GenerateMarketingMediaRequest) => void;
   onEdit: (payload: EditMarketingMediaRequest) => void;
-  onPrepare: () => void;
+  onPrepare: (options: PrepareInstagramOptions) => void;
+  onDestinationChange: (destination: InstagramPublishDestination) => void;
   onPublish: () => void;
+  onResetPreparation: () => void;
   onReset: () => void;
 }
 
@@ -174,6 +188,7 @@ export function InstagramCreateContainerForm({
   isEditing,
   prepareLoading,
   error,
+  prepareError,
   selectedMedia,
   preparedCreationId,
   publishLoading,
@@ -181,7 +196,9 @@ export function InstagramCreateContainerForm({
   onGenerate,
   onEdit,
   onPrepare,
+  onDestinationChange,
   onPublish,
+  onResetPreparation,
   onReset,
 }: Props) {
   const [mode, setMode] = useState<CreationMode>('upload');
@@ -193,6 +210,14 @@ export function InstagramCreateContainerForm({
   const [stylePrompt, setStylePrompt] = useState('');
   const [caption, setCaption] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [destination, setDestination] = useState<InstagramPublishDestination>('feed');
+  const [includeWhatsAppCta, setIncludeWhatsAppCta] = useState(false);
+  const [whatsappMessage, setWhatsappMessage] = useState('');
+  const [showPublishingPreview, setShowPublishingPreview] = useState(true);
+  const [selectedWizardStep, setSelectedWizardStep] = useState<WizardStepKey>('content');
+  const [contentDirty, setContentDirty] = useState(false);
+  const [fileSelectionDirty, setFileSelectionDirty] = useState(false);
+  const [whatsappTestError, setWhatsappTestError] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -205,10 +230,25 @@ export function InstagramCreateContainerForm({
     };
   }, [editPreviewUrl, uploadPreviewUrl]);
 
+  useEffect(() => {
+    if (preparedCreationId) {
+      setSelectedWizardStep('publish');
+    } else if (selectedMedia) {
+      setSelectedWizardStep('prepare');
+    }
+  }, [preparedCreationId, selectedMedia]);
+
+  useEffect(() => {
+    if (selectedMedia) {
+      setContentDirty(false);
+      setFileSelectionDirty(false);
+    }
+  }, [selectedMedia]);
+
   const isWorking = uploadLoading || isGenerating || isEditing || prepareLoading || publishLoading;
   const config = MODE_CONFIG[mode];
   const hasPreparedPost = Boolean(preparedCreationId);
-  const hasSavedMedia = Boolean(selectedMedia);
+  const hasSavedMedia = Boolean(selectedMedia) && !contentDirty;
   const activePrompt = prompt.trim();
   const hasContent =
     mode === 'upload'
@@ -219,7 +259,7 @@ export function InstagramCreateContainerForm({
   const wizardSteps = buildWizardSteps(hasContent, hasSavedMedia, hasPreparedPost);
   const resultPreviewUrl = selectedMedia?.publicUrl ?? null;
   const draftPreviewUrl = mode === 'edit' ? editPreviewUrl : uploadPreviewUrl;
-  const previewUrl = resultPreviewUrl || draftPreviewUrl;
+  const previewUrl = fileSelectionDirty ? draftPreviewUrl : resultPreviewUrl || draftPreviewUrl;
   const captionLength = caption.trim().length;
   const resetLabel = hasPreparedPost ? 'Empezar de nuevo' : mode === 'generate' ? 'Cambiar prompt' : 'Cambiar imagen';
   const showPrompt = mode === 'generate' || mode === 'edit';
@@ -247,7 +287,57 @@ export function InstagramCreateContainerForm({
     setStylePrompt('');
     setCaption('');
     setValidationError(null);
+    setDestination('feed');
+    setIncludeWhatsAppCta(false);
+    setWhatsappMessage('');
+    setShowPublishingPreview(true);
+    setSelectedWizardStep('content');
+    setContentDirty(false);
+    setFileSelectionDirty(false);
+    setWhatsappTestError(null);
+    onDestinationChange('feed');
     onReset();
+  };
+
+  const handleDestinationChange = (nextDestination: InstagramPublishDestination) => {
+    if (isWorking || preparedCreationId || nextDestination === destination) return;
+    setDestination(nextDestination);
+    onDestinationChange(nextDestination);
+    if (nextDestination === 'story') {
+      setIncludeWhatsAppCta(false);
+      setWhatsappTestError(null);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    setWhatsappTestError(null);
+    const message = whatsappMessage.trim() || MARKETING_WHATSAPP_DEFAULT_MESSAGE;
+    const whatsappLink = buildWhatsAppLink(MARKETING_WHATSAPP_PHONE, message);
+
+    try {
+      await Linking.openURL(whatsappLink);
+    } catch {
+      setWhatsappTestError('No pudimos abrir WhatsApp. Revisa que el navegador permita abrir enlaces externos.');
+    }
+  };
+
+  const handlePrepare = () => {
+    if (destination === 'story') {
+      onPrepare({ destination: 'story' });
+      return;
+    }
+
+    if (!includeWhatsAppCta) {
+      onPrepare({ destination: 'feed' });
+      return;
+    }
+
+    const message = whatsappMessage.trim();
+    onPrepare({
+      destination: 'feed',
+      includeWhatsAppCta: true,
+      ...(message ? { whatsappMessage: message } : {}),
+    });
   };
 
   const handleModeChange = (nextMode: CreationMode) => {
@@ -258,7 +348,11 @@ export function InstagramCreateContainerForm({
 
   const handleSelectedFile = (file: File, targetMode: 'upload' | 'edit') => {
     setValidationError(null);
-    onReset();
+    if (selectedMedia || preparedCreationId) {
+      onResetPreparation();
+      setContentDirty(true);
+      setFileSelectionDirty(true);
+    }
 
     if (typeof URL !== 'undefined') {
       const nextPreviewUrl = URL.createObjectURL(file);
@@ -275,6 +369,13 @@ export function InstagramCreateContainerForm({
       setUploadFile(file);
     } else {
       setEditFile(file);
+    }
+  };
+
+  const markContentDirty = () => {
+    if (selectedMedia || preparedCreationId) {
+      onResetPreparation();
+      setContentDirty(true);
     }
   };
 
@@ -366,6 +467,7 @@ export function InstagramCreateContainerForm({
   };
 
   const handlePrimaryAction = () => {
+    setSelectedWizardStep('save');
     if (mode === 'upload') {
       handleUpload();
       return;
@@ -377,6 +479,37 @@ export function InstagramCreateContainerForm({
     }
 
     handleEdit();
+  };
+
+  const isWizardStepAvailable = (step: WizardStepKey): boolean => {
+    switch (step) {
+      case 'content':
+        return true;
+      case 'save':
+        return hasContent || hasSavedMedia || hasPreparedPost;
+      case 'prepare':
+        return hasSavedMedia || hasPreparedPost;
+      case 'publish':
+        return hasPreparedPost;
+    }
+  };
+
+  const handleWizardStepPress = (step: WizardStepKey) => {
+    if (isWorking || !isWizardStepAvailable(step)) return;
+
+    setValidationError(null);
+    setSelectedWizardStep(step);
+
+    if (step === 'content' || step === 'save') {
+      if (hasPreparedPost) {
+        onResetPreparation();
+      }
+      return;
+    }
+
+    if (step === 'prepare' && hasPreparedPost) {
+      onResetPreparation();
+    }
   };
 
   return (
@@ -402,8 +535,20 @@ export function InstagramCreateContainerForm({
       </View>
 
       <View style={styles.wizard}>
-        {wizardSteps.map((step, index) => (
-          <View key={step.key} style={styles.wizardStep}>
+        {wizardSteps.map((step, index) => {
+          const isAvailable = isWizardStepAvailable(step.key);
+          const isSelected = selectedWizardStep === step.key;
+          return (
+          <TouchableOpacity
+            key={step.key}
+            style={[styles.wizardStep, isSelected && styles.wizardStepSelected]}
+            onPress={() => handleWizardStepPress(step.key)}
+            disabled={isWorking || !isAvailable}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !isAvailable, selected: isSelected }}
+            accessibilityLabel={`${step.label}. ${isAvailable ? 'Disponible' : 'Pendiente'}`}
+          >
             <View style={[styles.stepDot, styles[`stepDot_${step.status}`]]}>
               {step.status === 'completed' ? (
                 <Ionicons name="checkmark" size={12} color={colors.black} />
@@ -416,9 +561,13 @@ export function InstagramCreateContainerForm({
             <Text style={[styles.stepLabel, styles[`stepLabel_${step.status}`]]} numberOfLines={1}>
               {step.label}
             </Text>
-          </View>
-        ))}
+          </TouchableOpacity>
+          );
+        })}
       </View>
+      <Text style={styles.wizardHelp}>
+        Selecciona un paso completado para revisarlo o modificarlo.
+      </Text>
 
       <View style={styles.modeIntro}>
         <Text style={styles.modeTitle}>{config.title}</Text>
@@ -452,7 +601,7 @@ export function InstagramCreateContainerForm({
             value={prompt}
             onChangeText={(value) => {
               setPrompt(value);
-              if (selectedMedia) onReset();
+              markContentDirty();
             }}
             placeholder={
               mode === 'generate'
@@ -469,7 +618,10 @@ export function InstagramCreateContainerForm({
           <TextInput
             style={styles.input}
             value={stylePrompt}
-            onChangeText={setStylePrompt}
+            onChangeText={(value) => {
+              setStylePrompt(value);
+              markContentDirty();
+            }}
             placeholder="Ejemplo: elegante, profesional, premium"
             placeholderTextColor={colors.gray600}
             editable={!isWorking && !preparedCreationId}
@@ -496,7 +648,10 @@ export function InstagramCreateContainerForm({
       <TextInput
         style={[styles.input, styles.captionInput]}
         value={caption}
-        onChangeText={setCaption}
+        onChangeText={(value) => {
+          setCaption(value);
+          markContentDirty();
+        }}
         placeholder="Escribe un caption para la publicación..."
         placeholderTextColor={colors.gray600}
         multiline
@@ -528,6 +683,16 @@ export function InstagramCreateContainerForm({
         </View>
       ) : null}
 
+      {prepareError ? (
+        <View style={styles.errorRow}>
+          <Ionicons name="alert-circle-outline" size={14} color={colors.error} />
+          <View style={styles.statusInfo}>
+            <Text style={styles.errorTitle}>{prepareError.title}</Text>
+            <Text style={styles.errorText}>{prepareError.message}</Text>
+          </View>
+        </View>
+      ) : null}
+
       {selectedMedia ? (
         <View style={styles.uploadedBox}>
           <Ionicons name="cloud-done-outline" size={18} color={colors.success} />
@@ -538,18 +703,36 @@ export function InstagramCreateContainerForm({
         </View>
       ) : null}
 
+      {contentDirty ? (
+        <View style={styles.unsavedBox}>
+          <Ionicons name="create-outline" size={18} color={colors.warning} />
+          <View style={styles.statusInfo}>
+            <Text style={styles.unsavedTitle}>Cambios pendientes de guardar</Text>
+            <Text style={styles.unsavedText}>Guarda nuevamente antes de volver a Preparar.</Text>
+          </View>
+        </View>
+      ) : null}
+
       {preparedCreationId ? (
         <View style={styles.preparedBox}>
           <Ionicons name="checkmark-circle" size={20} color={colors.success} />
           <View style={styles.statusInfo}>
-            <Text style={styles.preparedTitle}>Publicación preparada</Text>
-            <Text style={styles.preparedText}>Ya puedes publicarla en Instagram cuando estés listo.</Text>
+            <Text style={styles.preparedTitle}>
+              {destination === 'story' ? 'Historia preparada' : 'Publicación preparada'}
+            </Text>
+            <Text style={styles.preparedText}>
+              {destination === 'story'
+                ? 'Ya puedes publicarla como historia cuando estés listo.'
+                : includeWhatsAppCta
+                  ? 'Se preparó la publicación con enlace de WhatsApp.'
+                  : 'Ya puedes publicarla en Instagram cuando estés listo.'}
+            </Text>
           </View>
         </View>
       ) : null}
 
       <View style={styles.buttonStack}>
-        {!selectedMedia ? (
+        {(!selectedMedia || contentDirty) ? (
           <PrimaryButton
             label={isPrimaryLoading ? config.loadingTitle : config.buttonLabel}
             onPress={handlePrimaryAction}
@@ -559,14 +742,132 @@ export function InstagramCreateContainerForm({
           />
         ) : null}
 
-        {selectedMedia && !preparedCreationId ? (
-          <PrimaryButton
-            label="Preparar para Instagram"
-            onPress={onPrepare}
-            loading={prepareLoading}
-            disabled={isWorking}
-            icon="logo-instagram"
-          />
+        {selectedMedia && !contentDirty && !preparedCreationId ? (
+          <View style={styles.publishingOptions}>
+            <Text style={styles.optionsTitle}>Opciones de publicación</Text>
+            <Text style={styles.label}>Destino</Text>
+            <View style={styles.destinationSelector}>
+              {(['feed', 'story'] as const).map((item) => {
+                const isActive = destination === item;
+                return (
+                  <TouchableOpacity
+                    key={item}
+                    style={[styles.destinationButton, isActive && styles.destinationButtonActive]}
+                    onPress={() => handleDestinationChange(item)}
+                    disabled={isWorking}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: isActive }}
+                  >
+                    <Text style={[styles.destinationText, isActive && styles.destinationTextActive]}>
+                      {item === 'feed' ? 'Feed' : 'Historia'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.optionHelp}>
+              {destination === 'feed'
+                ? 'Publicación normal en tu perfil de Instagram.'
+                : 'Contenido temporal en historias de Instagram.'}
+            </Text>
+
+            {destination === 'feed' ? (
+              <>
+                <View style={styles.switchRow}>
+                  <View style={styles.switchCopy}>
+                    <Text style={styles.switchLabel}>Incluir enlace de WhatsApp</Text>
+                    <Text style={styles.optionHelp}>Incluye un enlace de WhatsApp dentro del texto de la publicación.</Text>
+                  </View>
+                  <Switch
+                    value={includeWhatsAppCta}
+                    onValueChange={(value) => {
+                      setIncludeWhatsAppCta(value);
+                      setWhatsappTestError(null);
+                    }}
+                    disabled={isWorking}
+                    trackColor={{ false: colors.gray700, true: colors.gold + '80' }}
+                    thumbColor={includeWhatsAppCta ? colors.gold : colors.gray400}
+                  />
+                </View>
+                {includeWhatsAppCta ? (
+                  <>
+                    <Text style={styles.label}>Mensaje para WhatsApp <Text style={styles.optional}>(opcional)</Text></Text>
+                    <TextInput
+                      style={[styles.input, styles.whatsappInput]}
+                      value={whatsappMessage}
+                      onChangeText={setWhatsappMessage}
+                      placeholder="Hola, quiero agendar una cita."
+                      placeholderTextColor={colors.gray600}
+                      multiline
+                      editable={!isWorking}
+                    />
+                    <Text style={styles.optionHelp}>Se agregará un enlace de WhatsApp al texto de la publicación.</Text>
+                    <TouchableOpacity
+                      style={styles.testWhatsAppButton}
+                      onPress={() => void handleTestWhatsApp()}
+                      disabled={isWorking}
+                      activeOpacity={0.8}
+                      accessibilityRole="link"
+                      accessibilityLabel="Probar WhatsApp"
+                      accessibilityHint="Abre el enlace de WhatsApp empresarial con el mensaje precargado"
+                    >
+                      <Ionicons name="open-outline" size={17} color={colors.gold} />
+                      <Text style={styles.testWhatsAppButtonText}>Probar WhatsApp</Text>
+                    </TouchableOpacity>
+                    {whatsappTestError ? (
+                      <Text style={styles.testWhatsAppError}>{whatsappTestError}</Text>
+                    ) : null}
+                    <Text style={styles.organicWhatsAppNote}>
+                      En publicaciones orgánicas, WhatsApp se agrega como enlace en el texto. El botón verde de WhatsApp pertenece a anuncios promocionados.
+                    </Text>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <View style={styles.storyNotice}>
+                <Ionicons name="information-circle-outline" size={18} color={colors.gold} />
+                <Text style={styles.storyNoticeText}>Las historias no admiten enlace de WhatsApp en este flujo.</Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={styles.previewToggle}
+              onPress={() => setShowPublishingPreview((current) => !current)}
+              disabled={isWorking}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showPublishingPreview }}
+            >
+              <View style={styles.previewToggleCopy}>
+                <Ionicons name="eye-outline" size={18} color={colors.gold} />
+                <Text style={styles.previewToggleText}>
+                  {showPublishingPreview ? 'Ocultar vista previa' : 'Ver vista previa'}
+                </Text>
+              </View>
+              <Ionicons
+                name={showPublishingPreview ? 'chevron-up-outline' : 'chevron-down-outline'}
+                size={18}
+                color={colors.gray400}
+              />
+            </TouchableOpacity>
+
+            {showPublishingPreview && resultPreviewUrl ? (
+              <InstagramPostPreview
+                destination={destination}
+                imageUrl={resultPreviewUrl}
+                caption={caption}
+                includeWhatsAppCta={destination === 'feed' && includeWhatsAppCta}
+                whatsappMessage={whatsappMessage}
+              />
+            ) : null}
+
+            <PrimaryButton
+              label="Preparar para Instagram"
+              onPress={handlePrepare}
+              loading={prepareLoading}
+              disabled={isWorking}
+              icon="logo-instagram"
+            />
+          </View>
         ) : null}
 
         {preparedCreationId ? (
@@ -633,6 +934,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignItems: 'center',
     gap: spacing.xs,
+    borderRadius: radii.md,
+    paddingVertical: spacing.xs,
+  },
+  wizardStepSelected: {
+    backgroundColor: colors.gold + '12',
   },
   stepDot: {
     width: 26,
@@ -680,6 +986,13 @@ const styles = StyleSheet.create({
   },
   stepLabel_completed: {
     color: colors.gray300,
+  },
+  wizardHelp: {
+    ...typography.caption,
+    color: colors.gray500,
+    textAlign: 'center',
+    marginTop: -spacing.xs,
+    marginBottom: spacing.md,
   },
   modeIntro: {
     marginBottom: spacing.lg,
@@ -777,6 +1090,135 @@ const styles = StyleSheet.create({
     minHeight: 72,
     textAlignVertical: 'top',
   },
+  publishingOptions: {
+    borderWidth: 1,
+    borderColor: colors.gray700,
+    borderRadius: radii.md,
+    backgroundColor: colors.gray800,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  optionsTitle: {
+    ...typography.body,
+    color: colors.white,
+    fontWeight: '700',
+  },
+  destinationSelector: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  destinationButton: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.gray700,
+    borderRadius: radii.md,
+    backgroundColor: colors.gray900,
+  },
+  destinationButtonActive: {
+    borderColor: colors.gold,
+    backgroundColor: colors.gold,
+  },
+  destinationText: {
+    ...typography.bodySmall,
+    color: colors.gray300,
+    fontWeight: '700',
+  },
+  destinationTextActive: {
+    color: colors.black,
+  },
+  optionHelp: {
+    ...typography.caption,
+    color: colors.gray400,
+    lineHeight: 17,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  switchCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+  },
+  switchLabel: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '600',
+  },
+  whatsappInput: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+    marginBottom: 0,
+  },
+  testWhatsAppButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    borderRadius: radii.md,
+    backgroundColor: colors.gray900,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  testWhatsAppButtonText: {
+    ...typography.button,
+    color: colors.gold,
+  },
+  testWhatsAppError: {
+    ...typography.caption,
+    color: colors.error,
+    lineHeight: 16,
+  },
+  organicWhatsAppNote: {
+    ...typography.caption,
+    color: colors.gray500,
+    lineHeight: 16,
+  },
+  storyNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.gold + '55',
+    borderRadius: radii.sm,
+    backgroundColor: colors.gold + '12',
+    padding: spacing.sm,
+  },
+  storyNoticeText: {
+    ...typography.caption,
+    color: colors.gray300,
+    flex: 1,
+    lineHeight: 17,
+  },
+  previewToggle: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray700,
+    paddingTop: spacing.sm,
+  },
+  previewToggleCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  previewToggleText: {
+    ...typography.bodySmall,
+    color: colors.white,
+    fontWeight: '600',
+  },
   loadingBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -810,6 +1252,11 @@ const styles = StyleSheet.create({
     color: colors.error,
     flex: 1,
   },
+  errorTitle: {
+    ...typography.caption,
+    color: colors.error,
+    fontWeight: '700',
+  },
   uploadedBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -833,6 +1280,28 @@ const styles = StyleSheet.create({
   uploadedText: {
     ...typography.caption,
     color: colors.success,
+    marginTop: spacing.xxs,
+    lineHeight: 16,
+  },
+  unsavedBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.warning + '12',
+    borderWidth: 1,
+    borderColor: colors.warning + '55',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  unsavedTitle: {
+    ...typography.bodySmall,
+    color: colors.warning,
+    fontWeight: '700',
+  },
+  unsavedText: {
+    ...typography.caption,
+    color: colors.gray400,
     marginTop: spacing.xxs,
     lineHeight: 16,
   },

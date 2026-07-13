@@ -9,11 +9,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii } from '../../theme';
+import type { InstagramPublishDestination } from '../../types/marketing-media.types';
 
 interface Props {
   visible: boolean;
   loading: boolean;
   error: string | null;
+  destination: InstagramPublishDestination;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -22,6 +24,7 @@ export function InstagramPublishConfirmModal({
   visible,
   loading,
   error,
+  destination,
   onConfirm,
   onCancel,
 }: Props) {
@@ -38,9 +41,13 @@ export function InstagramPublishConfirmModal({
             <Ionicons name="warning-outline" size={32} color={colors.warning} />
           </View>
 
-          <Text style={styles.title}>Publicar en Instagram</Text>
+          <Text style={styles.title}>
+            {destination === 'story' ? 'Publicar historia en Instagram' : 'Publicar en Instagram'}
+          </Text>
           <Text style={styles.message}>
-            Esta acción publicará contenido visible en Instagram. ¿Deseas continuar?
+            {destination === 'story'
+              ? 'Esta acción publicará una historia visible en Instagram. ¿Deseas continuar?'
+              : 'Esta acción publicará contenido visible en Instagram. ¿Deseas continuar?'}
           </Text>
 
           {error ? (
@@ -73,7 +80,7 @@ export function InstagramPublishConfirmModal({
               ) : (
                 <>
                   <Ionicons name="paper-plane-outline" size={16} color={colors.black} />
-                  <Text style={styles.confirmText}>Publicar en Instagram</Text>
+                  <Text style={styles.confirmText}>Publicar</Text>
                 </>
               )}
             </TouchableOpacity>

@@ -11,6 +11,7 @@ import { InstagramCreateContainerForm } from '../../src/components/instagram/Ins
 import { InstagramPublishConfirmModal } from '../../src/components/instagram/InstagramPublishConfirmModal';
 import { useInstagram } from '../../src/hooks/use-instagram';
 import { useMarketingMedia } from '../../src/hooks/use-marketing-media';
+import type { InstagramPublishDestination } from '../../src/types/marketing-media.types';
 
 export default function MarketingScreen() {
   const {
@@ -33,17 +34,20 @@ export default function MarketingScreen() {
     isGenerating,
     isEditing,
     prepareLoading,
+    prepareError,
     error: marketingMediaError,
     uploadMedia,
     generateMedia,
     editMedia,
     listMedia: listMarketingMedia,
     prepareInstagramMedia,
+    resetInstagramPreparation,
     resetMediaFlow,
   } = useMarketingMedia();
 
   const [refreshing, setRefreshing] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [publishDestination, setPublishDestination] = useState<InstagramPublishDestination>('feed');
 
   useEffect(() => {
     void loadAll();
@@ -135,14 +139,17 @@ export default function MarketingScreen() {
           uploadLoading={uploadLoading}
           prepareLoading={prepareLoading}
           error={marketingMediaError}
+          prepareError={prepareError}
           selectedMedia={selectedMedia}
           preparedCreationId={preparedCreationId}
           publishLoading={publishLoading}
           onUpload={(file, caption) => void uploadMedia(file, caption)}
           onGenerate={(payload) => void generateMedia(payload)}
           onEdit={(payload) => void editMedia(payload)}
-          onPrepare={() => void prepareInstagramMedia(selectedMedia?.mediaId)}
+          onPrepare={(options) => void prepareInstagramMedia(selectedMedia?.mediaId, options)}
+          onDestinationChange={setPublishDestination}
           onPublish={() => setConfirmVisible(true)}
+          onResetPreparation={resetInstagramPreparation}
           onReset={resetMediaFlow}
           isGenerating={isGenerating}
           isEditing={isEditing}
@@ -169,6 +176,7 @@ export default function MarketingScreen() {
         visible={confirmVisible}
         loading={publishLoading}
         error={publishError}
+        destination={publishDestination}
         onConfirm={() => void handlePublishConfirm()}
         onCancel={() => setConfirmVisible(false)}
       />

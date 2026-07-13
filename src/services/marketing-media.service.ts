@@ -12,6 +12,7 @@ import type {
   MarketingMediaUploadResponse,
   PrepareInstagramMediaResponse,
   PrepareInstagramMediaResult,
+  PrepareInstagramOptions,
 } from '../types/marketing-media.types';
 
 export async function uploadMarketingMedia(
@@ -137,18 +138,21 @@ export async function getMarketingMedia(id: number): Promise<MarketingMedia> {
 
 export async function prepareInstagramMarketingMedia(
   id: number,
+  options?: PrepareInstagramOptions,
 ): Promise<PrepareInstagramMediaResult> {
   const response = await apiRequest<PrepareInstagramMediaResponse>(
     `/api/owner/marketing/media/${encodeURIComponent(String(id))}/prepare-instagram`,
     {
       method: 'POST',
       auth: 'owner',
+      body: options,
     },
   );
 
   return {
     mediaId: response.mediaId,
     status: response.status,
+    destination: response.destination,
     creationId: response.creationId,
   };
 }

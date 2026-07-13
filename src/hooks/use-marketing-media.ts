@@ -12,9 +12,11 @@ import type {
   EditMarketingMediaRequest,
   GenerateMarketingMediaRequest,
   MarketingMedia,
+  MarketingMediaHumanError,
   MarketingMediaResult,
   MarketingMediaStatus,
   MarketingMediaUploadFile,
+  PrepareInstagramOptions,
 } from '../types/marketing-media.types';
 
 type MarketingMediaOperation = 'upload' | 'generate' | 'edit' | 'prepare' | 'default';
@@ -68,6 +70,29 @@ function mapMarketingMediaError(
   return 'Error inesperado. Intenta nuevamente.';
 }
 
+function mapPrepareInstagramError(error: unknown): MarketingMediaHumanError {
+  if (isHttpError(error)) {
+    const message = error.message.toLowerCase();
+    if (message.includes('story') && (message.includes('whatsapp') || message.includes('cta'))) {
+      return {
+        title: 'No pudimos preparar la historia',
+        message: 'Las historias no admiten enlace de WhatsApp en este flujo.',
+      };
+    }
+    if (message.includes('whatsapp') && (message.includes('config') || message.includes('phone'))) {
+      return {
+        title: 'No pudimos agregar WhatsApp',
+        message: 'El enlace de WhatsApp no está configurado.',
+      };
+    }
+  }
+
+  return {
+    title: 'No pudimos preparar la publicación',
+    message: 'Intenta nuevamente en unos segundos.',
+  };
+}
+
 export function useMarketingMedia() {
   const [mediaItems, setMediaItems] = useState<MarketingMedia[]>([]);
   const [selectedMedia, setSelectedMedia] = useState<MarketingMediaResult | null>(null);
@@ -78,6 +103,7 @@ export function useMarketingMedia() {
   const [listLoading, setListLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [prepareLoading, setPrepareLoading] = useState(false);
+  const [prepareError, setPrepareError] = useState<MarketingMediaHumanError | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
@@ -182,7 +208,10 @@ export function useMarketingMedia() {
     }
   }, [listMedia]);
 
-  const prepareInstagramMedia = useCallback(async (mediaId?: number) => {
+  const prepareInstagramMedia = useCallback(async (
+    mediaId?: number,
+    options?: PrepareInstagramOptions,
+  ) => {
     const targetMediaId = mediaId ?? selectedMedia?.mediaId;
     if (!targetMediaId) {
       setError('Primero crea o selecciona una imagen para prepararla.');
@@ -191,14 +220,15 @@ export function useMarketingMedia() {
 
     setPrepareLoading(true);
     setError(null);
+    setPrepareError(null);
     setPreparedCreationId(null);
     try {
-      const prepared = await prepareInstagramMarketingMedia(targetMediaId);
+      const prepared = await prepareInstagramMarketingMedia(targetMediaId, options);
       setPreparedCreationId(prepared.creationId);
       await listMedia();
       return prepared;
     } catch (err: unknown) {
-      setError(mapMarketingMediaError(err, 'prepare'));
+      setPrepareError(mapPrepareInstagramError(err));
       return null;
     } finally {
       setPrepareLoading(false);
@@ -209,8 +239,15 @@ export function useMarketingMedia() {
     setSelectedMedia(null);
     setPreparedCreationId(null);
     setError(null);
+    setPrepareError(null);
     setGenerationError(null);
     setEditError(null);
+  }, []);
+
+  const resetInstagramPreparation = useCallback(() => {
+    setPreparedCreationId(null);
+    setPrepareError(null);
+    setError(null);
   }, []);
 
   const loading = uploadLoading || isGenerating || isEditing || listLoading || detailLoading || prepareLoading;
@@ -226,6 +263,7 @@ export function useMarketingMedia() {
     listLoading,
     detailLoading,
     prepareLoading,
+    prepareError,
     error,
     generationError,
     editError,
@@ -235,6 +273,7 @@ export function useMarketingMedia() {
     listMedia,
     getMedia,
     prepareInstagramMedia,
+    resetInstagramPreparation,
     resetMediaFlow,
   };
 }

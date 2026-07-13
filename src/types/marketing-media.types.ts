@@ -87,9 +87,23 @@ export interface MarketingMediaGetResponse {
   media: MarketingMedia;
 }
 
+export type InstagramPublishDestination = 'feed' | 'story';
+
+export interface PrepareInstagramOptions {
+  destination: InstagramPublishDestination;
+  includeWhatsAppCta?: boolean;
+  whatsappMessage?: string;
+}
+
+export interface MarketingMediaHumanError {
+  title: string;
+  message: string;
+}
+
 export interface PrepareInstagramMediaResult {
   mediaId: number;
   status: 'prepared';
+  destination: InstagramPublishDestination;
   creationId: string;
 }
 
